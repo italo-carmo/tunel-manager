@@ -15,6 +15,10 @@ export const siteConfig = {
     {
       label: "Listeners",
       href: "/listeners"
+    },
+    {
+      label: "Topology",
+      href: "/topology"
     }
   ],
   links: {

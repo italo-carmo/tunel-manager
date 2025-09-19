@@ -11,6 +11,7 @@ import { AuthContext } from "@/contexts/Auth.tsx";
 import DefaultLayout from "@/layouts/default.tsx";
 import ErrorContext from "@/contexts/Error.tsx";
 import { AccessDeniedError } from "@/errors/login.ts";
+import TopologyPage from "@/pages/topology/index.tsx";
 
 const PrivateRoute = () => {
   const { setError } = useContext(ErrorContext);
@@ -47,6 +48,7 @@ function App() {
         <Route element={<AgentPage />} path="/agents" />
         <Route element={<InterfacesPage />} path="/interfaces" />
         <Route element={<ListenersPage />} path="/listeners" />
+        <Route element={<TopologyPage />} path="/topology" />
       </Route>
       <Route
         element={<Navigate to={session ? "/agents" : "/login"} />}
