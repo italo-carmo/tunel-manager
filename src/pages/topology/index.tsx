@@ -36,6 +36,20 @@ interface TunnelConnection {
   from: Position;
   to: Position;
   status: "online" | "offline";
+  path: string;
+  label?: string | null;
+  labelPosition?: Position;
+}
+
+interface TunnelConnectionMetadata {
+  listenerId: number;
+  agentId: number;
+  targetHost: string | null;
+  targetPort: string | null;
+  listenerPort: string | null;
+  candidateHosts: string[];
+  displayPort: string | null;
+  displayTarget: string | null;
 }
 
 interface NormalizedTunnel {
@@ -44,6 +58,7 @@ interface NormalizedTunnel {
   label: string;
   details: string[];
   kind: "listener" | "primary";
+  connection?: TunnelConnectionMetadata;
 }
 
 interface TunnelEndpoint {
@@ -60,6 +75,90 @@ const HORIZONTAL_PADDING = 64;
 const VERTICAL_PADDING = 64;
 const DEFAULT_NODE_SIZE: NodeSize = { width: 288, height: 240 };
 const TUNNEL_LENGTH = 180;
+
+interface ParsedAddress {
+  host: string;
+  port: string | null;
+  normalizedHost: string;
+}
+
+const normalizeHostValue = (value?: string | null) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1).toLowerCase();
+  }
+
+  return trimmed.toLowerCase();
+};
+
+const parseAddress = (value?: string | null): ParsedAddress | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("[") && trimmed.includes("]")) {
+    const closingIndex = trimmed.indexOf("]");
+    const hostPart = trimmed.slice(1, closingIndex);
+    const remainder = trimmed.slice(closingIndex + 1);
+
+    let port: string | null = null;
+    if (remainder.startsWith(":")) {
+      const portCandidate = remainder.slice(1);
+      if (portCandidate && /^\d+$/.test(portCandidate)) port = portCandidate;
+    }
+
+    const normalizedHost = normalizeHostValue(hostPart) ?? hostPart.toLowerCase();
+    return { host: hostPart, port, normalizedHost };
+  }
+
+  const colonCount = (trimmed.match(/:/g) || []).length;
+
+  if (colonCount === 1) {
+    const [hostPart, portCandidate] = trimmed.split(":");
+    if (portCandidate && /^\d+$/.test(portCandidate)) {
+      const normalizedHost =
+        normalizeHostValue(hostPart) ?? hostPart.toLowerCase();
+      return { host: hostPart, port: portCandidate, normalizedHost };
+    }
+  }
+
+  const normalizedHost = normalizeHostValue(trimmed) ?? trimmed.toLowerCase();
+
+  return {
+    host: trimmed,
+    port: null,
+    normalizedHost,
+  };
+};
+
+const parseCidrHost = (value?: string | null) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex === -1) return trimmed;
+
+  return trimmed.slice(0, slashIndex);
+};
+
+const uniqueHosts = (values: Array<string | null | undefined>) => {
+  const set = new Set<string>();
+  values.forEach((value) => {
+    const normalized = normalizeHostValue(value);
+    if (normalized) set.add(normalized);
+  });
+  return Array.from(set);
+};
+
+const getConnectionLabel = (connection?: TunnelConnectionMetadata) =>
+  connection?.displayPort ??
+  connection?.listenerPort ??
+  connection?.targetPort ??
+  null;
 
 const buildTunnelPath = (from: Position, to: Position) => {
   const midX = from.x + (to.x - from.x) / 2;
@@ -86,6 +185,40 @@ const normalizeListener = (listener: Listener): NormalizedTunnel => {
   if (listener.RemoteAddr) details.push(`Remote ${listener.RemoteAddr}`);
   if (listener.Network) details.push(`Network ${listener.Network}`);
 
+  const parsedListenerAddr = parseAddress(listener.ListenerAddr);
+  const parsedRedirectAddr = parseAddress(listener.RedirectAddr);
+  const parsedRemoteAddr = parseAddress(listener.RemoteAddr);
+
+  const candidateHosts = uniqueHosts([
+    parsedRedirectAddr?.host,
+    parsedRemoteAddr?.host,
+  ]);
+
+  const connection: TunnelConnectionMetadata | undefined =
+    candidateHosts.length ||
+    parsedListenerAddr?.port ||
+    parsedRedirectAddr?.port ||
+    parsedRemoteAddr?.port
+      ? {
+          listenerId: listener.ListenerID,
+          agentId: listener.AgentID,
+          targetHost:
+            parsedRedirectAddr?.host ?? parsedRemoteAddr?.host ?? null,
+          targetPort:
+            parsedRedirectAddr?.port ?? parsedRemoteAddr?.port ?? null,
+          listenerPort: parsedListenerAddr?.port ?? null,
+          candidateHosts,
+          displayPort:
+            parsedRedirectAddr?.port ??
+            parsedListenerAddr?.port ??
+            parsedRemoteAddr?.port ??
+            null,
+          displayTarget:
+            listener.RedirectAddr || listener.RemoteAddr || listener.ListenerAddr ||
+            null,
+        }
+      : undefined;
+
   return {
     id: `listener-${listener.ListenerID}`,
     status: listener.Online ? "online" : "offline",
@@ -95,6 +228,7 @@ const normalizeListener = (listener: Listener): NormalizedTunnel => {
       `Listener #${listener.ListenerID}`,
     details,
     kind: "listener",
+    connection,
   };
 };
 
@@ -144,6 +278,33 @@ export default function TopologyPage() {
       return acc;
     }, {});
   }, [listeners]);
+
+  const agentAddressMap = useMemo(() => {
+    const map = new Map<string, string>();
+
+    agentEntries.forEach(([agentId, agent]) => {
+      const addresses = new Set<string>();
+
+      const parsedRemote = parseAddress(agent.RemoteAddr);
+      if (parsedRemote?.normalizedHost)
+        addresses.add(parsedRemote.normalizedHost);
+
+      agent.Network.forEach((network) => {
+        network.Addresses?.forEach((address) => {
+          const host = parseCidrHost(address);
+          if (!host) return;
+          const normalized = normalizeHostValue(host);
+          if (normalized) addresses.add(normalized);
+        });
+      });
+
+      addresses.forEach((address) => {
+        if (!map.has(address)) map.set(address, agentId);
+      });
+    });
+
+    return map;
+  }, [agentEntries]);
 
   const tunnelsByAgent = useMemo(() => {
     const map: Record<string, NormalizedTunnel[]> = {};
@@ -319,24 +480,77 @@ export default function TopologyPage() {
       const step = Math.max(size.height / (tunnels.length + 1), 56);
 
       tunnels.forEach((tunnel, index) => {
-        const anchorY = position.y + Math.min(size.height - 32, step * (index + 1));
+        const anchorY =
+          position.y + Math.min(size.height - 32, step * (index + 1));
         const from = {
           x: position.x + size.width,
           y: anchorY,
         };
-        const to = {
-          x: from.x + TUNNEL_LENGTH,
-          y: anchorY,
-        };
         const id = `${agentId}-${tunnel.id}`;
+        const label = getConnectionLabel(tunnel.connection);
 
-        connectionList.push({ id, from, to, status: tunnel.status });
-        endpointList.push({ id, x: to.x, y: anchorY, tunnel });
+        const pushConnection = (to: Position, shouldCreateEndpoint: boolean) => {
+          const path = buildTunnelPath(from, to);
+          connectionList.push({
+            id,
+            from,
+            to,
+            status: tunnel.status,
+            path,
+            label,
+            labelPosition: label
+              ? {
+                  x: from.x + (to.x - from.x) / 2,
+                  y: from.y + (to.y - from.y) / 2 - 12,
+                }
+              : undefined,
+          });
+
+          if (shouldCreateEndpoint) {
+            endpointList.push({ id, x: to.x, y: anchorY, tunnel });
+          }
+        };
+
+        if (tunnel.connection) {
+          const targetAgentId = tunnel.connection.candidateHosts
+            .map((host) => agentAddressMap.get(host))
+            .find((value): value is string => Boolean(value));
+
+          if (targetAgentId && targetAgentId !== agentId) {
+            const targetPosition = positions[targetAgentId];
+            if (targetPosition) {
+              const targetSize =
+                nodeSizes[targetAgentId] ?? DEFAULT_NODE_SIZE;
+              const to = {
+                x: targetPosition.x,
+                y: targetPosition.y + targetSize.height / 2,
+              };
+
+              pushConnection(to, false);
+              return;
+            }
+          }
+
+          if (tunnel.connection.targetHost) {
+            const to = { x: from.x + TUNNEL_LENGTH, y: anchorY };
+            pushConnection(to, true);
+            return;
+          }
+        }
+
+        const to = { x: from.x + TUNNEL_LENGTH, y: anchorY };
+        pushConnection(to, true);
       });
     });
 
     return { connections: connectionList, endpoints: endpointList };
-  }, [agentEntries, nodeSizes, positions, tunnelsByAgent]);
+  }, [
+    agentEntries,
+    agentAddressMap,
+    nodeSizes,
+    positions,
+    tunnelsByAgent,
+  ]);
 
   const totalAgents = agentEntries.length;
   const rows = Math.max(1, Math.ceil(totalAgents / DEFAULT_COLUMNS));
@@ -385,23 +599,49 @@ export default function TopologyPage() {
             </filter>
           </defs>
           {connections.map((connection) => (
-            <path
-              key={connection.id}
-              d={buildTunnelPath(connection.from, connection.to)}
-              fill="none"
-              stroke={
-                connection.status === "online"
-                  ? "rgba(248, 113, 113, 0.95)"
-                  : "rgba(148, 163, 184, 0.55)"
-              }
-              strokeWidth={12}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeDasharray={connection.status === "online" ? undefined : "14 14"}
-              filter={
-                connection.status === "online" ? "url(#tunnel-glow)" : undefined
-              }
-            />
+            <g key={connection.id}>
+              <path
+                d={connection.path}
+                fill="none"
+                stroke={
+                  connection.status === "online"
+                    ? "rgba(248, 113, 113, 0.95)"
+                    : "rgba(148, 163, 184, 0.55)"
+                }
+                strokeWidth={12}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray={
+                  connection.status === "online" ? undefined : "14 14"
+                }
+                filter={
+                  connection.status === "online" ? "url(#tunnel-glow)" : undefined
+                }
+              />
+              {connection.label ? (
+                <text
+                  x={
+                    connection.labelPosition?.x ??
+                    connection.from.x + (connection.to.x - connection.from.x) / 2
+                  }
+                  y={
+                    connection.labelPosition?.y ??
+                    connection.from.y + (connection.to.y - connection.from.y) / 2 - 12
+                  }
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={12}
+                  fontWeight={600}
+                  fill={
+                    connection.status === "online"
+                      ? "rgba(248, 113, 113, 0.95)"
+                      : "rgba(100, 116, 139, 0.75)"
+                  }
+                >
+                  {connection.label}
+                </text>
+              ) : null}
+            </g>
           ))}
         </svg>
 
@@ -602,7 +842,14 @@ export default function TopologyPage() {
                   : "border-default-200 bg-default-50/95 text-default-500",
               )}
             >
-              <p className="font-semibold">{endpoint.tunnel.label}</p>
+              <p className="font-semibold">
+                {endpoint.tunnel.connection?.targetHost ?? endpoint.tunnel.label}
+              </p>
+              {endpoint.tunnel.connection?.displayPort ? (
+                <p className="font-mono text-[10px] uppercase tracking-wide text-current/70">
+                  Port {endpoint.tunnel.connection.displayPort}
+                </p>
+              ) : null}
               {endpoint.tunnel.details.length ? (
                 <ul className="mt-1 space-y-[2px] text-[11px]">
                   {endpoint.tunnel.details.map((detail, index) => (
