@@ -68,6 +68,33 @@ interface TunnelEndpoint {
   tunnel: NormalizedTunnel;
 }
 
+interface RemoteHostConnectionInfo {
+  agentId: string;
+  agentName: string;
+  tunnel: NormalizedTunnel;
+}
+
+interface AgentTopologyNode {
+  id: string;
+  kind: "agent";
+  label: string;
+  status: "online" | "offline";
+  agentId: string;
+  agent: LigoloAgent;
+  tunnels: NormalizedTunnel[];
+}
+
+interface HostTopologyNode {
+  id: string;
+  kind: "host";
+  label: string;
+  status: "online" | "offline";
+  normalizedHost: string;
+  connections: RemoteHostConnectionInfo[];
+}
+
+type TopologyNode = AgentTopologyNode | HostTopologyNode;
+
 const DEFAULT_COLUMNS = 3;
 const COLUMN_WIDTH = 340;
 const ROW_HEIGHT = 260;
@@ -159,6 +186,24 @@ const getConnectionLabel = (connection?: TunnelConnectionMetadata) =>
   connection?.listenerPort ??
   connection?.targetPort ??
   null;
+
+const getTunnelHostCandidates = (tunnel: NormalizedTunnel) => {
+  if (!tunnel.connection) return [] as string[];
+
+  const hosts = new Set<string>();
+
+  tunnel.connection.candidateHosts.forEach((host) => hosts.add(host));
+
+  const normalizedTarget = normalizeHostValue(tunnel.connection.targetHost);
+  if (normalizedTarget) hosts.add(normalizedTarget);
+
+  if (tunnel.connection.displayTarget) {
+    const parsedDisplay = parseAddress(tunnel.connection.displayTarget);
+    if (parsedDisplay?.normalizedHost) hosts.add(parsedDisplay.normalizedHost);
+  }
+
+  return Array.from(hosts);
+};
 
 const buildTunnelPath = (from: Position, to: Position) => {
   const midX = from.x + (to.x - from.x) / 2;
@@ -336,6 +381,95 @@ export default function TopologyPage() {
     return map;
   }, [agentEntries, listenersByAgent]);
 
+  const remoteHostData = useMemo(() => {
+    const hostMap = new Map<
+      string,
+      { label: string; connections: RemoteHostConnectionInfo[] }
+    >();
+
+    agentEntries.forEach(([agentId, agent]) => {
+      const tunnels = tunnelsByAgent[agentId] ?? [];
+
+      tunnels.forEach((tunnel) => {
+        if (tunnel.kind !== "listener" || !tunnel.connection) return;
+
+        const hostCandidates = getTunnelHostCandidates(tunnel);
+
+        const targetAgentId = hostCandidates
+          .map((candidate) => agentAddressMap.get(candidate))
+          .find(
+            (value): value is string => Boolean(value) && value !== agentId,
+          );
+
+        if (targetAgentId) return;
+
+        const remoteHostKey = hostCandidates.find(
+          (candidate) => !agentAddressMap.has(candidate),
+        );
+
+        if (!remoteHostKey) return;
+
+        const displayHost =
+          tunnel.connection.targetHost ??
+          parseAddress(tunnel.connection.displayTarget)?.host ??
+          remoteHostKey;
+
+        if (!hostMap.has(remoteHostKey)) {
+          hostMap.set(remoteHostKey, {
+            label: displayHost,
+            connections: [],
+          });
+        }
+
+        hostMap.get(remoteHostKey)!.connections.push({
+          agentId,
+          agentName: agent.Name || `Agent #${agentId}`,
+          tunnel,
+        });
+      });
+    });
+
+    const remoteNodes: HostTopologyNode[] = Array.from(hostMap.entries()).map(
+      ([normalizedHost, value]) => ({
+        id: `host-${normalizedHost}`,
+        kind: "host",
+        label: value.label,
+        status: value.connections.some((item) => item.tunnel.status === "online")
+          ? "online"
+          : "offline",
+        normalizedHost,
+        connections: value.connections,
+      }),
+    );
+
+    const hostIdMap = new Map<string, string>();
+    remoteNodes.forEach((node) => hostIdMap.set(node.normalizedHost, node.id));
+
+    return { remoteNodes, hostIdMap };
+  }, [agentEntries, agentAddressMap, tunnelsByAgent]);
+
+  const remoteHostNodes = remoteHostData.remoteNodes;
+  const remoteHostIdMap = remoteHostData.hostIdMap;
+
+  const agentNodes = useMemo<AgentTopologyNode[]>(
+    () =>
+      agentEntries.map(([agentId, agent]) => ({
+        id: agentId,
+        kind: "agent" as const,
+        label: agent.Name || "Unnamed agent",
+        status: agent.Running ? "online" : "offline",
+        agentId,
+        agent,
+        tunnels: tunnelsByAgent[agentId] ?? [],
+      })),
+    [agentEntries, tunnelsByAgent],
+  );
+
+  const topologyNodes = useMemo<TopologyNode[]>(
+    () => [...agentNodes, ...remoteHostNodes],
+    [agentNodes, remoteHostNodes],
+  );
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -344,7 +478,7 @@ export default function TopologyPage() {
   const [dragState, setDragState] = useState<DragState | null>(null);
 
   useEffect(() => {
-    if (!agentEntries.length) {
+    if (!topologyNodes.length) {
       setPositions({});
       return;
     }
@@ -353,12 +487,12 @@ export default function TopologyPage() {
       const next = { ...prev };
       let changed = false;
 
-      agentEntries.forEach(([id], index) => {
-        if (!next[id]) {
+      topologyNodes.forEach((node, index) => {
+        if (!next[node.id]) {
           const column = index % DEFAULT_COLUMNS;
           const row = Math.floor(index / DEFAULT_COLUMNS);
 
-          next[id] = {
+          next[node.id] = {
             x: HORIZONTAL_PADDING + column * COLUMN_WIDTH,
             y: VERTICAL_PADDING + row * ROW_HEIGHT,
           };
@@ -367,7 +501,7 @@ export default function TopologyPage() {
       });
 
       Object.keys(next).forEach((id) => {
-        if (!agentEntries.some(([key]) => key === id)) {
+        if (!topologyNodes.some((node) => node.id === id)) {
           delete next[id];
           changed = true;
         }
@@ -375,7 +509,7 @@ export default function TopologyPage() {
 
       return changed ? next : prev;
     });
-  }, [agentEntries]);
+  }, [topologyNodes]);
 
   useLayoutEffect(() => {
     const updateSizes = () => {
@@ -408,7 +542,7 @@ export default function TopologyPage() {
     window.addEventListener("resize", updateSizes);
 
     return () => window.removeEventListener("resize", updateSizes);
-  }, [agentEntries, tunnelsByAgent]);
+  }, [topologyNodes]);
 
   useEffect(() => {
     if (!dragState) return;
@@ -469,39 +603,86 @@ export default function TopologyPage() {
     const connectionList: TunnelConnection[] = [];
     const endpointList: TunnelEndpoint[] = [];
 
-    agentEntries.forEach(([agentId]) => {
-      const position = positions[agentId];
+    const targetTotals = new Map<string, number>();
+
+    agentNodes.forEach((agentNode) => {
+      agentNode.tunnels.forEach((tunnel) => {
+        if (tunnel.kind !== "listener" || !tunnel.connection) return;
+
+        const hostCandidates = getTunnelHostCandidates(tunnel);
+
+        const targetAgentId = hostCandidates
+          .map((candidate) => agentAddressMap.get(candidate))
+          .find(
+            (value): value is string =>
+              Boolean(value) && value !== agentNode.agentId,
+          );
+
+        if (targetAgentId) {
+          targetTotals.set(
+            targetAgentId,
+            (targetTotals.get(targetAgentId) ?? 0) + 1,
+          );
+          return;
+        }
+
+        const remoteHostId = hostCandidates
+          .map((candidate) => remoteHostIdMap.get(candidate))
+          .find((value): value is string => Boolean(value));
+
+        if (remoteHostId) {
+          targetTotals.set(
+            remoteHostId,
+            (targetTotals.get(remoteHostId) ?? 0) + 1,
+          );
+        }
+      });
+    });
+
+    const targetUsage = new Map<string, number>();
+
+    agentNodes.forEach((agentNode) => {
+      const position = positions[agentNode.id];
       if (!position) return;
 
-      const tunnels = tunnelsByAgent[agentId] ?? [];
+      const tunnels = agentNode.tunnels;
       if (!tunnels.length) return;
 
-      const size = nodeSizes[agentId] ?? DEFAULT_NODE_SIZE;
+      const size = nodeSizes[agentNode.id] ?? DEFAULT_NODE_SIZE;
       const step = Math.max(size.height / (tunnels.length + 1), 56);
 
       tunnels.forEach((tunnel, index) => {
         const anchorY =
           position.y + Math.min(size.height - 32, step * (index + 1));
-        const from = {
+        const baseFromRight = {
           x: position.x + size.width,
           y: anchorY,
         };
-        const id = `${agentId}-${tunnel.id}`;
+        const baseFromLeft = {
+          x: position.x,
+          y: anchorY,
+        };
+        const id = `${agentNode.id}-${tunnel.id}`;
         const label = getConnectionLabel(tunnel.connection);
 
-        const pushConnection = (to: Position, shouldCreateEndpoint: boolean) => {
-          const path = buildTunnelPath(from, to);
+        const pushConnection = (
+          to: Position,
+          shouldCreateEndpoint: boolean,
+          fromOverride?: Position,
+        ) => {
+          const fromPoint = fromOverride ?? baseFromRight;
+          const path = buildTunnelPath(fromPoint, to);
           connectionList.push({
             id,
-            from,
+            from: fromPoint,
             to,
             status: tunnel.status,
             path,
             label,
             labelPosition: label
               ? {
-                  x: from.x + (to.x - from.x) / 2,
-                  y: from.y + (to.y - from.y) / 2 - 12,
+                  x: fromPoint.x + (to.x - fromPoint.x) / 2,
+                  y: fromPoint.y + (to.y - fromPoint.y) / 2 - 12,
                 }
               : undefined,
           });
@@ -512,48 +693,88 @@ export default function TopologyPage() {
         };
 
         if (tunnel.connection) {
-          const targetAgentId = tunnel.connection.candidateHosts
-            .map((host) => agentAddressMap.get(host))
-            .find((value): value is string => Boolean(value));
+          const hostCandidates = getTunnelHostCandidates(tunnel);
 
-          if (targetAgentId && targetAgentId !== agentId) {
+          const targetAgentId = hostCandidates
+            .map((candidate) => agentAddressMap.get(candidate))
+            .find(
+              (value): value is string =>
+                Boolean(value) && value !== agentNode.agentId,
+            );
+
+          if (targetAgentId && targetAgentId !== agentNode.agentId) {
             const targetPosition = positions[targetAgentId];
             if (targetPosition) {
               const targetSize =
                 nodeSizes[targetAgentId] ?? DEFAULT_NODE_SIZE;
+              const total = targetTotals.get(targetAgentId) ?? 1;
+              const usage = (targetUsage.get(targetAgentId) ?? 0) + 1;
+              targetUsage.set(targetAgentId, usage);
+              const targetStep = Math.max(targetSize.height / (total + 1), 56);
+              const targetAnchorY =
+                targetPosition.y +
+                Math.min(targetSize.height - 32, targetStep * usage);
+              const targetOnRight = targetPosition.x >= position.x;
               const to = {
-                x: targetPosition.x,
-                y: targetPosition.y + targetSize.height / 2,
+                x: targetOnRight
+                  ? targetPosition.x
+                  : targetPosition.x + targetSize.width,
+                y: targetAnchorY,
               };
+              const fromPoint = targetOnRight ? baseFromRight : baseFromLeft;
 
-              pushConnection(to, false);
+              pushConnection(to, false, fromPoint);
+              return;
+            }
+          }
+
+          const remoteHostId = hostCandidates
+            .map((candidate) => remoteHostIdMap.get(candidate))
+            .find((value): value is string => Boolean(value));
+
+          if (remoteHostId) {
+            const targetPosition = positions[remoteHostId];
+            if (targetPosition) {
+              const targetSize =
+                nodeSizes[remoteHostId] ?? DEFAULT_NODE_SIZE;
+              const total = targetTotals.get(remoteHostId) ?? 1;
+              const usage = (targetUsage.get(remoteHostId) ?? 0) + 1;
+              targetUsage.set(remoteHostId, usage);
+              const targetStep = Math.max(targetSize.height / (total + 1), 56);
+              const targetAnchorY =
+                targetPosition.y +
+                Math.min(targetSize.height - 32, targetStep * usage);
+              const targetOnRight = targetPosition.x >= position.x;
+              const to = {
+                x: targetOnRight
+                  ? targetPosition.x
+                  : targetPosition.x + targetSize.width,
+                y: targetAnchorY,
+              };
+              const fromPoint = targetOnRight ? baseFromRight : baseFromLeft;
+
+              pushConnection(to, false, fromPoint);
               return;
             }
           }
 
           if (tunnel.connection.targetHost) {
-            const to = { x: from.x + TUNNEL_LENGTH, y: anchorY };
+            const to = { x: baseFromRight.x + TUNNEL_LENGTH, y: anchorY };
             pushConnection(to, true);
             return;
           }
         }
 
-        const to = { x: from.x + TUNNEL_LENGTH, y: anchorY };
-        pushConnection(to, true);
+        const fallbackTo = { x: baseFromRight.x + TUNNEL_LENGTH, y: anchorY };
+        pushConnection(fallbackTo, true);
       });
     });
 
     return { connections: connectionList, endpoints: endpointList };
-  }, [
-    agentEntries,
-    agentAddressMap,
-    nodeSizes,
-    positions,
-    tunnelsByAgent,
-  ]);
+  }, [agentAddressMap, agentNodes, nodeSizes, positions, remoteHostIdMap]);
 
-  const totalAgents = agentEntries.length;
-  const rows = Math.max(1, Math.ceil(totalAgents / DEFAULT_COLUMNS));
+  const totalNodes = topologyNodes.length;
+  const rows = Math.max(1, Math.ceil(totalNodes / DEFAULT_COLUMNS));
   const canvasHeight = Math.max(rows * ROW_HEIGHT + VERTICAL_PADDING * 2, 520);
 
   const isInitialLoading = agentsLoading && !agentEntries.length;
@@ -661,35 +882,26 @@ export default function TopologyPage() {
           </div>
         ) : null}
 
-        {agentEntries.map(([agentId, agent]) => {
-          const position = positions[agentId];
+        {topologyNodes.map((node) => {
+          const position = positions[node.id];
           if (!position) return null;
 
-          const tunnels = tunnelsByAgent[agentId] ?? [];
+          const isDragging = dragState?.id === node.id;
 
-          return (
-            <div
-              key={agentId}
-              ref={(node) => {
-                if (!node) delete nodeRefs.current[agentId];
-                else nodeRefs.current[agentId] = node;
-              }}
-              className={clsx(
-                "absolute w-72 select-none transition-shadow",
-                dragState?.id === agentId ? "cursor-grabbing" : "cursor-grab",
-              )}
-              style={{
-                left: `${position.x}px`,
-                top: `${position.y}px`,
-                zIndex: dragState?.id === agentId ? 30 : 10,
-              }}
-              onPointerDown={handlePointerDown(agentId)}
-            >
+          let content: JSX.Element;
+
+          if (node.kind === "agent") {
+            const agent = node.agent;
+            const filteredNetworks = agent.Network.filter(
+              (network) => network.Name !== "lo",
+            );
+
+            content = (
               <div className="flex h-full flex-col gap-4 rounded-2xl border border-default-200/80 bg-content1/95 p-4 shadow-xl backdrop-blur">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex flex-col gap-1">
                     <p className="text-[11px] uppercase tracking-wide text-default-400">
-                      Agent #{agentId}
+                      Agent #{node.agentId}
                     </p>
                     <h2 className="text-lg font-semibold text-default-900">
                       {agent.Name || "Unnamed agent"}
@@ -699,11 +911,11 @@ export default function TopologyPage() {
                     </p>
                   </div>
                   <Chip
-                    color={agent.Running ? "success" : "default"}
+                    color={node.status === "online" ? "success" : "default"}
                     size="sm"
                     variant="flat"
                   >
-                    {agent.Running ? "Active" : "Stopped"}
+                    {node.status === "online" ? "Active" : "Stopped"}
                   </Chip>
                 </div>
 
@@ -731,72 +943,131 @@ export default function TopologyPage() {
                   <p className="text-xs font-semibold uppercase text-default-400">
                     Network interfaces
                   </p>
-                  <div className="max-h-32 space-y-2 overflow-y-auto pr-1">
-                    {agent.Network.map((network) => (
-                      <div
-                        key={`${network.Index}-${network.Name}`}
-                        className="rounded-xl border border-default-200/70 bg-default-50/80 px-3 py-2 text-[11px] text-default-500 shadow-inner"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-default-700">
-                            {network.Name}
-                          </span>
-                          <span>MTU {network.MTU}</span>
-                        </div>
-                        {network.Addresses?.length ? (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {network.Addresses.map((address) => (
-                              <Chip
-                                key={address}
-                                size="sm"
-                                variant="flat"
-                                radius="sm"
-                                className="font-mono text-[11px]"
-                              >
-                                {address}
-                              </Chip>
-                            ))}
+                  {filteredNetworks.length ? (
+                    <div className="max-h-32 space-y-2 overflow-y-auto pr-1">
+                      {filteredNetworks.map((network) => (
+                        <div
+                          key={`${network.Index}-${network.Name}`}
+                          className="rounded-xl border border-default-200/70 bg-default-50/80 px-3 py-2 text-[11px] text-default-500 shadow-inner"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-default-700">
+                              {network.Name}
+                            </span>
+                            <span>MTU {network.MTU}</span>
                           </div>
-                        ) : (
-                          <p className="mt-2 text-[11px] italic text-default-400">
-                            No addresses
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                          {network.Addresses?.length ? (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {network.Addresses.map((address) => (
+                                <Chip
+                                  key={address}
+                                  size="sm"
+                                  variant="flat"
+                                  radius="sm"
+                                  className="font-mono text-[11px]"
+                                >
+                                  {address}
+                                </Chip>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-[11px] italic text-default-400">
+                              No addresses
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs italic text-default-400">
+                      No network interfaces to display.
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          } else {
+            content = (
+              <div className="flex h-full flex-col gap-4 rounded-2xl border border-default-200/80 bg-content1/95 p-4 shadow-xl backdrop-blur">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-[11px] uppercase tracking-wide text-default-400">
+                      Remote host
+                    </p>
+                    <h2 className="text-lg font-semibold text-default-900">
+                      {node.label}
+                    </h2>
+                    <p className="font-mono text-[11px] text-default-500">
+                      {node.normalizedHost}
+                    </p>
                   </div>
+                  <Chip
+                    color={node.status === "online" ? "success" : "default"}
+                    size="sm"
+                    variant="flat"
+                  >
+                    {node.status === "online" ? "Active" : "Offline"}
+                  </Chip>
                 </div>
 
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase text-default-400">
-                    Tunnels
+                    Linked tunnels
                   </p>
-                  {tunnels.length ? (
+                  {node.connections.length ? (
                     <div className="max-h-32 space-y-2 overflow-y-auto pr-1">
-                      {tunnels.map((tunnel) => (
+                      {node.connections.map((connection) => (
                         <div
-                          key={tunnel.id}
+                          key={`${node.id}-${connection.tunnel.id}-${connection.agentId}`}
                           className={clsx(
                             "rounded-xl border px-3 py-2 text-[11px] shadow-sm",
-                            tunnel.status === "online"
+                            connection.tunnel.status === "online"
                               ? "border-danger-200/80 bg-danger-50/80 text-danger-600"
                               : "border-default-200 bg-default-50 text-default-500",
                           )}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold">{tunnel.label}</span>
-                            <Chip
-                              color={tunnel.status === "online" ? "success" : "default"}
-                              size="sm"
-                              variant="flat"
-                            >
-                              {tunnel.status === "online" ? "Active" : "Offline"}
-                            </Chip>
+                            <span className="font-semibold">
+                              {connection.agentName}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {connection.tunnel.connection?.displayPort ? (
+                                <Chip
+                                  size="sm"
+                                  variant="flat"
+                                  radius="sm"
+                                  className="font-mono text-[10px]"
+                                >
+                                  Port {connection.tunnel.connection.displayPort}
+                                </Chip>
+                              ) : null}
+                              <Chip
+                                color={
+                                  connection.tunnel.status === "online"
+                                    ? "success"
+                                    : "default"
+                                }
+                                size="sm"
+                                variant="flat"
+                              >
+                                {connection.tunnel.status === "online"
+                                  ? "Active"
+                                  : "Offline"}
+                              </Chip>
+                            </div>
                           </div>
-                          {tunnel.details.length ? (
+                          {connection.tunnel.connection?.displayTarget ? (
+                            <p className="mt-1 font-mono text-[11px] text-current/80">
+                              {connection.tunnel.connection.displayTarget}
+                            </p>
+                          ) : null}
+                          {connection.tunnel.details.length ? (
                             <ul className="mt-2 space-y-[2px] text-[10px] text-current/80">
-                              {tunnel.details.map((detail, index) => (
-                                <li key={`${tunnel.id}-detail-${index}`} className="font-mono">
+                              {connection.tunnel.details.map((detail, index) => (
+                                <li
+                                  key={`${node.id}-${connection.tunnel.id}-detail-${index}`}
+                                  className="font-mono"
+                                >
                                   {detail}
                                 </li>
                               ))}
@@ -807,11 +1078,33 @@ export default function TopologyPage() {
                     </div>
                   ) : (
                     <p className="text-xs italic text-default-400">
-                      No tunnels for this agent yet.
+                      No tunnels linked to this host yet.
                     </p>
                   )}
                 </div>
               </div>
+            );
+          }
+
+          return (
+            <div
+              key={node.id}
+              ref={(element) => {
+                if (!element) delete nodeRefs.current[node.id];
+                else nodeRefs.current[node.id] = element;
+              }}
+              className={clsx(
+                "absolute w-72 select-none transition-shadow",
+                isDragging ? "cursor-grabbing" : "cursor-grab",
+              )}
+              style={{
+                left: `${position.x}px`,
+                top: `${position.y}px`,
+                zIndex: isDragging ? 30 : 10,
+              }}
+              onPointerDown={handlePointerDown(node.id)}
+            >
+              {content}
             </div>
           );
         })}
