@@ -185,10 +185,10 @@ export default function AgentPage() {
                         </TableCell>
 
                         {/* HeroUI doesn't seems to support colspan properly */}
-                        <TableCell children={null} className={"hidden"} />
-                        <TableCell children={null} className={"hidden"} />
-                        <TableCell children={null} className={"hidden"} />
-                        <TableCell children={null} className={"hidden"} />
+                        <TableCell className="hidden" />
+                        <TableCell className="hidden" />
+                        <TableCell className="hidden" />
+                        <TableCell className="hidden" />
                       </TableRow>
                     </>
                   ))
