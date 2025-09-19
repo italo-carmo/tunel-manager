@@ -572,7 +572,7 @@ export default function TopologyPage() {
 
       <div
         ref={containerRef}
-        className="relative isolate w-full overflow-hidden rounded-3xl border border-default-200/60 bg-default-50/40 shadow-sm"
+        className="full relative isolate w-full overflow-hidden rounded-3xl border border-default-200/60 bg-default-50/40 shadow-sm"
         style={{
           height: `${canvasHeight}px`,
           minHeight: `${canvasHeight}px`,
