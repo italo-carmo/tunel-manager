@@ -1,4 +1,4 @@
-import { useCallback, useContext, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import useAgents from "@/hooks/useAgents.ts";
 import {
   Button,
@@ -25,6 +25,17 @@ interface ListenerCreationProps {
   agentId?: number;
 }
 
+function uniqueIPv4s(addresses?: string[]) {
+  const seen = new Set<string>();
+  (addresses ?? []).forEach((addr) => {
+    const ip = addr?.split?.("/")?.[0];
+    if (ip && ip.includes(".") && ip !== "127.0.0.1" && !seen.has(ip)) {
+      seen.add(ip);
+    }
+  });
+  return Array.from(seen);
+}
+
 export function ListenerCreationModal({
   isOpen,
   onOpenChange,
@@ -40,6 +51,29 @@ export function ListenerCreationModal({
   const { agents } = useAgents();
   const { setError } = useContext(ErrorContext);
   const [formErrors, setFormErrors] = useState({});
+
+  useEffect(() => {
+    setSelectedAgent(agentId);
+  }, [agentId]);
+
+  const selectedAgentData = useMemo(() => {
+    if (!agents) return null;
+    if (selectedAgent == null) return null;
+    const record = agents as unknown as Record<string, LigoloAgent>;
+    return record[String(selectedAgent)] ?? null;
+  }, [agents, selectedAgent]);
+
+  const agentInterfaces = useMemo(() => {
+    if (!selectedAgentData) return [];
+    return (selectedAgentData.Network ?? []).map((network, index) => {
+      const ips = uniqueIPv4s(network?.Addresses);
+      return {
+        key: `${network.Index ?? network.Name ?? index}`,
+        name: network.Name || `Interface ${network.Index ?? index + 1}`,
+        ips,
+      };
+    });
+  }, [selectedAgentData]);
 
   const addInterface = useCallback(
     (callback: () => unknown) => async () => {
@@ -80,8 +114,10 @@ export function ListenerCreationModal({
             <ModalBody>
               <Form validationErrors={formErrors}>
                 <Select
+                  selectedKeys={selectedAgent != null ? [String(selectedAgent)] : []}
                   onSelectionChange={(keys) => {
-                    setSelectedAgent(Number(keys.currentKey));
+                    const key = keys.currentKey;
+                    setSelectedAgent(key != null ? Number(key) : undefined);
                   }}
                   label={"Agent"}
                   name={"agentId"}
@@ -100,6 +136,44 @@ export function ListenerCreationModal({
                       )
                     : null}
                 </Select>
+                {selectedAgentData ? (
+                  <div className="mt-2 rounded-lg border border-default-200 bg-default-50 px-3 py-2">
+                    <p className="mb-2 text-xs font-semibold text-default-500">
+                      IPv4 disponíveis
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {agentInterfaces.length ? (
+                        agentInterfaces.map((iface) => (
+                          <div key={iface.key} className="flex flex-col gap-1">
+                            <span className="text-xs font-medium text-default-600">
+                              {iface.name}
+                            </span>
+                            {iface.ips.length ? (
+                              <div className="flex flex-wrap gap-2">
+                                {iface.ips.map((ip) => (
+                                  <span
+                                    key={ip}
+                                    className="rounded-md border border-default-200 bg-white px-2 py-0.5 text-[11px] text-default-600"
+                                  >
+                                    {ip}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-default-400">
+                                Nenhum IPv4 disponível.
+                              </span>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-[11px] text-default-400">
+                          Nenhuma interface encontrada.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
                 <Input
                   endContent={
                     <EthernetPort className="text-2xl text-default-400 pointer-events-none flex-shrink-0" />
