@@ -17,6 +17,7 @@ import { useApi } from "@/hooks/useApi.ts";
 import { LigoloAgent } from "@/types/agents.ts";
 import ErrorContext from "@/contexts/Error.tsx";
 import { listenerSchema } from "@/schemas/listeners.ts";
+import clsx from "clsx";
 
 interface ListenerCreationProps {
   isOpen?: boolean;
@@ -74,6 +75,27 @@ export function ListenerCreationModal({
       };
     });
   }, [selectedAgentData]);
+
+  const listenerIp = useMemo(() => {
+    if (!listenerAddr) return "";
+    const colonIndex = listenerAddr.lastIndexOf(":");
+    if (colonIndex === -1) return listenerAddr;
+    return listenerAddr.slice(0, colonIndex);
+  }, [listenerAddr]);
+
+  const handleSelectIp = useCallback(
+    (ip: string) => {
+      setListenerAddr((currentValue) => {
+        if (!currentValue) return ip;
+
+        const colonIndex = currentValue.lastIndexOf(":");
+        const portPart = colonIndex !== -1 ? currentValue.slice(colonIndex) : "";
+
+        return `${ip}${portPart}`;
+      });
+    },
+    [setListenerAddr],
+  );
 
   const addInterface = useCallback(
     (callback: () => unknown) => async () => {
@@ -151,12 +173,20 @@ export function ListenerCreationModal({
                             {iface.ips.length ? (
                               <div className="flex flex-wrap gap-2">
                                 {iface.ips.map((ip) => (
-                                  <span
+                                  <button
                                     key={ip}
-                                    className="rounded-md border border-default-200 bg-white px-2 py-0.5 text-[11px] text-default-600"
+                                    type="button"
+                                    onClick={() => handleSelectIp(ip)}
+                                    aria-pressed={listenerIp === ip}
+                                    className={clsx(
+                                      "rounded-md border px-2 py-0.5 text-[11px] transition-colors focus:outline-none",
+                                      listenerIp === ip
+                                        ? "border-primary-400 bg-primary-100 text-primary"
+                                        : "border-default-200 bg-white text-default-600 hover:border-default-300 hover:bg-default-100",
+                                    )}
                                   >
                                     {ip}
-                                  </span>
+                                  </button>
                                 ))}
                               </div>
                             ) : (
