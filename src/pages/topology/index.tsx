@@ -335,12 +335,12 @@ export default function Topology() {
 
   // UI --------------------------------------------------------------------
   return (
-    <div className="p-8">
+    <div  className="p-8">
       <div style={{ display: "flex", alignItems: "center" }}>
         <h1 className="text-2xl font-semibold mb-6">Topologia</h1>
       </div>
 
-      <div ref={stageRef} className="relative w-full h-[460px] rounded-xl border bg-white">
+      <div style={{minHeight:'750px'}} ref={stageRef} className="relative w-full h-[460px] rounded-xl border bg-white">
         {/* conexões */}
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
           {connections.map((conn) => (
@@ -424,7 +424,7 @@ export default function Topology() {
         ))}
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="text-xs text-slate-500">
         Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam automaticamente.
       </p>
     </div>
