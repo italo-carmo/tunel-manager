@@ -8,7 +8,7 @@ export default function DefaultLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="relative flex flex-col h-screen">
+    <div style={{backgroundColor: '#eee'}} className="relative flex flex-col h-screen">
       <Navbar />
       <main className="container mx-auto max-w-7xl px-6 flex-grow">
         {children}
@@ -20,8 +20,8 @@ export default function DefaultLayout({
           href="https://github.com/nicocha30/ligolo-ng"
           title="Ligolo-ng homepage"
         >
-          <span className="text-default-600">Ligolo-ng WebUI -</span>
-          <p className="text-primary">Nicocha30 & L&#39;Ami du Raisin</p>
+          <span className="text-default-600">Ligolo Tunnel Manager -</span>
+          <p className="text-primary">#ITL</p>
         </Link>
       </footer>
     </div>

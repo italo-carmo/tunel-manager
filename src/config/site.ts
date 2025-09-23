@@ -5,7 +5,7 @@ export const siteConfig = {
   description: "An advanced, yet simple, tunneling tool that uses TUN interfaces.",
   navItems: [
     {
-      label: "Agents",
+      label: "Agentes",
       href: "/"
     },
     {
@@ -17,7 +17,7 @@ export const siteConfig = {
       href: "/listeners"
     },
     {
-      label: "Topology",
+      label: "Topologia",
       href: "/topology"
     }
   ],

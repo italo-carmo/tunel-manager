@@ -2,6 +2,7 @@ import clsx from "clsx";
 import { useContext } from "react";
 import { BookMarked, Github, HeartIcon, SatelliteDish } from "lucide-react";
 import { link as linkStyles } from "@heroui/theme";
+import ciber from "../assets/ciber.png";
 import {
   Button,
   Link,
@@ -23,7 +24,7 @@ export const Navbar = () => {
   const { session } = useContext(AuthContext);
 
   return (
-    <NextUINavbar maxWidth="xl" position="sticky">
+    <NextUINavbar style={{backgroundColor: '#000', opacity: '80%'}} maxWidth="xl" position="sticky">
       <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
         <NavbarBrand className="gap-3 max-w-fit">
           <Link
@@ -31,14 +32,15 @@ export const Navbar = () => {
             color="foreground"
             href="/"
           >
-            <Logo />
-            <p className="font-bold text-inherit">Ligolo-ng</p>
+        <img style={{ marginLeft: 10 }} src={ciber} alt="Ciber" className="h-12 object-contain" />
+            <p style={{color: '#fff'}} className="font-bold text-inherit">Ligolo-ng Tunnel Manager</p>
           </Link>
         </NavbarBrand>
         <div className="hidden lg:flex gap-4 justify-start ml-2">
           {siteConfig.navItems.map((item) => (
             <NavbarItem key={item.href}>
               <Link
+              style={{color: '#ffcc29', fontWeight: 'bold'}}
                 className={clsx(
                   linkStyles({ color: "foreground" }),
                   "data-[active=true]:text-primary data-[active=true]:font-medium"
@@ -58,56 +60,12 @@ export const Navbar = () => {
         justify="end"
       >
         <NavbarItem className="hidden sm:flex gap-2">
-          <Link isExternal href={siteConfig.links.docs} title="Documentation">
-            <BookMarked
-              className="text-default-500"
-            />
-          </Link>
-          <Link isExternal href={siteConfig.links.github} title="GitHub">
-            <Github
-              className="text-default-500"
-              fill="currentcolor"
-              stroke="0"
-            />
-          </Link>
-
+          <span style={{color: '#ffcc29', fontWeight: 'bold'}}>Dark Mode</span>
           <ThemeSwitch />
-        </NavbarItem>
-        <NavbarItem className="hidden md:flex">
-          <Button
-            isExternal
-            as={Link}
-            className="text-sm font-normal text-default-600 bg-default-100"
-            href={siteConfig.links.sponsor}
-            startContent={
-              <HeartIcon
-                className="text-danger"
-                fill="currentcolor"
-                stroke="0"
-              />
-            }
-            variant="flat"
-            isIconOnly={true}
-          ></Button>
-        </NavbarItem>
-        <NavbarItem className="hidden md:flex">
-          <Button
-            isExternal
-            as={Link}
-            className="text-sm font-normal text-default-600 bg-default-100"
-            startContent={<SatelliteDish />}
-            color={session ? "warning" : "danger"}
-            variant="flat"
-          >
-            {session ? "Connected to Ligolo-ng" : "Not connected"}
-          </Button>
         </NavbarItem>
       </NavbarContent>
 
       <NavbarContent className="sm:hidden basis-1 pl-4" justify="end">
-        <Link isExternal href={siteConfig.links.github}>
-          <Github className="text-default-500" />
-        </Link>
         <ThemeSwitch />
         <NavbarMenuToggle />
       </NavbarContent>

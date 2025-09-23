@@ -4,7 +4,6 @@ import useAgents from "@/hooks/useAgents.ts";
 import useListeners from "@/hooks/useListeners.ts";
 import type { LigoloAgent } from "@/types/agents.ts";
 import type { Listener } from "@/types/listeners.ts";
-import ciber from "../../assets/ciber.png";
 
 type Vec2 = { x: number; y: number };
 
@@ -339,7 +338,6 @@ export default function Topology() {
     <div className="p-8">
       <div style={{ display: "flex", alignItems: "center" }}>
         <h1 className="text-2xl font-semibold mb-6">Topologia</h1>
-        <img style={{ marginLeft: 10 }} src={ciber} alt="Ciber" className="mb-6 h-12 object-contain" />
       </div>
 
       <div ref={stageRef} className="relative w-full h-[460px] rounded-xl border bg-white">

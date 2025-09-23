@@ -14,15 +14,6 @@ export default function DefaultLayout({
         {children}
       </main>
       <footer className="w-full flex items-center justify-center py-3">
-        <Link
-          isExternal
-          className="flex items-center gap-1 text-current"
-          href="https://github.com/nicocha30/ligolo-ng"
-          title="Ligolo-ng homepage"
-        >
-          <span className="text-default-600">Ligolo-ng WebUI -</span>
-          <p className="text-primary">Nicocha30 & L&#39;Ami du Raisin</p>
-        </Link>
       </footer>
     </div>
   );
