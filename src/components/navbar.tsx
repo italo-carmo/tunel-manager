@@ -1,6 +1,5 @@
 import clsx from "clsx";
-import { useContext } from "react";
-import { BookMarked, Github, HeartIcon, SatelliteDish } from "lucide-react";
+import { useCallback, useContext } from "react";
 import { link as linkStyles } from "@heroui/theme";
 import ciber from "../assets/ciber.png";
 import {
@@ -17,11 +16,17 @@ import {
 
 import { siteConfig } from "@/config/site";
 import { ThemeSwitch } from "@/components/theme-switch";
-import { Logo } from "@/assets/icons/logo";
 import { AuthContext } from "@/contexts/Auth.tsx";
+import { useNavigate } from "react-router-dom";
 
 export const Navbar = () => {
-  const { session } = useContext(AuthContext);
+  const { session, logOut } = useContext(AuthContext);
+  const navigate = useNavigate();
+
+  const handleLogout = useCallback(() => {
+    logOut();
+    navigate("/");
+  }, [logOut, navigate]);
 
   return (
     <NextUINavbar style={{backgroundColor: '#000', opacity: '80%'}} maxWidth="xl" position="sticky">
@@ -56,9 +61,16 @@ export const Navbar = () => {
       </NavbarContent>
 
       <NavbarContent
-        className="hidden sm:flex basis-1/5 sm:basis-full"
+        className="hidden sm:flex basis-1/5 sm:basis-full items-center gap-4"
         justify="end"
       >
+        {session && (
+          <NavbarItem>
+            <Button color="danger" onPress={handleLogout} size="sm" variant="solid">
+              Logout
+            </Button>
+          </NavbarItem>
+        )}
         <NavbarItem className="hidden sm:flex gap-2">
           <span style={{color: '#ffcc29', fontWeight: 'bold'}}>Dark Mode</span>
           <ThemeSwitch />
@@ -79,6 +91,13 @@ export const Navbar = () => {
               </Link>
             </NavbarMenuItem>
           ))}
+          {session && (
+            <NavbarMenuItem>
+              <Button color="danger" fullWidth onPress={handleLogout} size="sm">
+                Logout
+              </Button>
+            </NavbarMenuItem>
+          )}
         </div>
       </NavbarMenu>
     </NextUINavbar>
