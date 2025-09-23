@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useEffect, useMemo, useRef, useState } from "react";
+
+import { ListenerManagementSection } from "@/components/listeners/ListenerManagementSection.tsx";
 import useAgents from "@/hooks/useAgents.ts";
 import useListeners from "@/hooks/useListeners.ts";
 import type { LigoloAgent } from "@/types/agents.ts";
@@ -113,8 +115,15 @@ function createPortPin(
 // componente ---------------------------------------------------------------
 export default function Topology() {
   const { agents } = useAgents();
-  const { listeners } = useListeners();
-  const listenerList = asArray<Partial<Listener>>(listeners);
+  const {
+    listeners,
+    loading: listenersLoading,
+    mutate: mutateListeners,
+  } = useListeners();
+  const listenerList = useMemo(
+    () => asArray<Partial<Listener>>(listeners),
+    [listeners],
+  );
 
   // ip -> agentId
   const ipToAgent = useMemo(() => {
@@ -335,12 +344,27 @@ export default function Topology() {
 
   // UI --------------------------------------------------------------------
   return (
-    <div  className="p-8">
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <h1 className="text-2xl font-semibold mb-6">Topologia</h1>
+    <div className="flex flex-col gap-8 py-6 pb-12">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold text-slate-900">Topologia</h1>
+        <p className="text-sm text-slate-500">
+          Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
+        </p>
       </div>
 
-      <div style={{minHeight:'750px'}} ref={stageRef} className="relative w-full h-[460px] rounded-xl border bg-white">
+      <ListenerManagementSection
+        listeners={listeners}
+        loading={listenersLoading}
+        mutate={mutateListeners}
+        className="gap-6"
+      />
+
+      <section className="flex flex-col gap-3">
+        <div
+          ref={stageRef}
+          className="relative w-full min-h-[460px] rounded-xl border bg-white shadow-sm"
+          style={{ minHeight: 520, height: "clamp(420px, 65vh, 720px)" }}
+        >
         {/* conexões */}
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
           {connections.map((conn) => (
@@ -422,11 +446,13 @@ export default function Topology() {
             </div>
           </div>
         ))}
-      </div>
+        </div>
 
-      <p className="text-xs text-slate-500">
-        Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam automaticamente.
-      </p>
+        <p className="text-xs text-slate-500">
+          Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam
+          automaticamente.
+        </p>
+      </section>
     </div>
   );
 }

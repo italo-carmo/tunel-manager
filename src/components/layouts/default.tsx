@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Link } from "@heroui/react";
 import { Navbar } from "@/components/navbar";
 
 export default function DefaultLayout({

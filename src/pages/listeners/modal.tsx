@@ -1,4 +1,11 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import useAgents from "@/hooks/useAgents.ts";
 import {
   Button,
@@ -13,6 +20,7 @@ import {
   SelectItem,
 } from "@heroui/react";
 import { EthernetPort } from "lucide-react";
+import { useDragControls } from "framer-motion";
 import { useApi } from "@/hooks/useApi.ts";
 import { LigoloAgent } from "@/types/agents.ts";
 import ErrorContext from "@/contexts/Error.tsx";
@@ -52,6 +60,7 @@ export function ListenerCreationModal({
   const { agents } = useAgents();
   const { setError } = useContext(ErrorContext);
   const [formErrors, setFormErrors] = useState({});
+  const dragControls = useDragControls();
 
   useEffect(() => {
     setSelectedAgent(agentId);
@@ -125,12 +134,34 @@ export function ListenerCreationModal({
     [mutate, selectedAgent, listenerAddr, redirectAddr, listenerProtocol],
   );
 
+  const handleHeaderPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      dragControls.start(event);
+    },
+    [dragControls],
+  );
+
   return (
-    <Modal isOpen={isOpen} placement="top-center" onOpenChange={onOpenChange}>
+    <Modal
+      isOpen={isOpen}
+      placement="top-center"
+      onOpenChange={onOpenChange}
+      motionProps={{
+        drag: true,
+        dragControls,
+        dragListener: false,
+        dragMomentum: false,
+      }}
+    >
       <ModalContent>
         {(onClose) => (
           <>
-            <ModalHeader className="flex flex-col gap-1">
+            <ModalHeader
+              className="flex flex-col gap-1 cursor-move select-none active:cursor-grabbing"
+              onPointerDown={handleHeaderPointerDown}
+            >
               Add a new listener
             </ModalHeader>
             <ModalBody>
