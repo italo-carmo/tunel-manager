@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import useAgents from "@/hooks/useAgents.ts";
@@ -20,12 +21,21 @@ import {
   SelectItem,
 } from "@heroui/react";
 import { EthernetPort } from "lucide-react";
-import { useDragControls } from "framer-motion";
 import { useApi } from "@/hooks/useApi.ts";
 import { LigoloAgent } from "@/types/agents.ts";
 import ErrorContext from "@/contexts/Error.tsx";
 import { listenerSchema } from "@/schemas/listeners.ts";
 import clsx from "clsx";
+
+type DragState = {
+  pointerId: number | null;
+  startX: number;
+  startY: number;
+  originX: number;
+  originY: number;
+  handlePointerMove?: (event: PointerEvent) => void;
+  handlePointerUp?: (event: PointerEvent) => void;
+};
 
 interface ListenerCreationProps {
   isOpen?: boolean;
@@ -60,7 +70,68 @@ export function ListenerCreationModal({
   const { agents } = useAgents();
   const { setError } = useContext(ErrorContext);
   const [formErrors, setFormErrors] = useState({});
-  const dragControls = useDragControls();
+  const [modalOffset, setModalOffset] = useState({ x: 0, y: 0 });
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<DragState>({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+  });
+
+  const applyTranslate = useCallback((x: number, y: number) => {
+    if (typeof window === "undefined") return;
+
+    let node = wrapperRef.current;
+    if (!node) {
+      node = document.querySelector<HTMLDivElement>(".listener-creation-modal-wrapper");
+      if (node) wrapperRef.current = node;
+    }
+
+    if (node) {
+      node.style.setProperty("translate", `${x}px ${y}px`);
+    }
+  }, []);
+
+  const cleanupDrag = useCallback(() => {
+    const { handlePointerMove, handlePointerUp } = dragStateRef.current;
+
+    if (handlePointerMove) {
+      window.removeEventListener("pointermove", handlePointerMove);
+    }
+
+    if (handlePointerUp) {
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    }
+
+    dragStateRef.current = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      originX: 0,
+      originY: 0,
+    };
+  }, []);
+
+  useEffect(() => cleanupDrag, [cleanupDrag]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      cleanupDrag();
+      if (modalOffset.x !== 0 || modalOffset.y !== 0) {
+        setModalOffset({ x: 0, y: 0 });
+      }
+      if (wrapperRef.current) {
+        wrapperRef.current.style.removeProperty("translate");
+        wrapperRef.current = null;
+      }
+      return;
+    }
+
+    applyTranslate(modalOffset.x, modalOffset.y);
+  }, [applyTranslate, cleanupDrag, isOpen, modalOffset.x, modalOffset.y]);
 
   useEffect(() => {
     setSelectedAgent(agentId);
@@ -138,9 +209,47 @@ export function ListenerCreationModal({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       event.preventDefault();
-      dragControls.start(event.nativeEvent);
+      const pointerId = event.pointerId;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const { x: originX, y: originY } = modalOffset;
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
+        moveEvent.preventDefault();
+
+        const deltaX = moveEvent.clientX - startX;
+        const deltaY = moveEvent.clientY - startY;
+
+        const nextX = originX + deltaX;
+        const nextY = originY + deltaY;
+
+        setModalOffset({ x: nextX, y: nextY });
+        applyTranslate(nextX, nextY);
+      };
+
+      const handlePointerUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return;
+        cleanupDrag();
+      };
+
+      cleanupDrag();
+
+      dragStateRef.current = {
+        pointerId,
+        startX,
+        startY,
+        originX,
+        originY,
+        handlePointerMove,
+        handlePointerUp,
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+      window.addEventListener("pointercancel", handlePointerUp);
     },
-    [dragControls],
+    [applyTranslate, cleanupDrag, modalOffset],
   );
 
   return (
@@ -148,12 +257,7 @@ export function ListenerCreationModal({
       isOpen={isOpen}
       placement="top-center"
       onOpenChange={onOpenChange}
-      motionProps={{
-        drag: true,
-        dragControls,
-        dragListener: false,
-        dragMomentum: false,
-      }}
+      classNames={{ wrapper: "listener-creation-modal-wrapper" }}
     >
       <ModalContent>
         {(onClose) => (
