@@ -80,7 +80,7 @@ export default function Topology() {
     );
 
     // Agents
-    Object.entries(agents ?? {}).forEach(([agentId, agent], idx) => {
+    Object.entries(agents ?? {}).forEach(([agentId, agent]) => {
       const ips: string[] = [];
       asArray(agent?.Network).forEach((n: any) => ips.push(...uniqueIPv4s(n?.Addresses)));
       const hasToProxy = listenerList.some((l: any) => {
