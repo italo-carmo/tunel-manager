@@ -1,7 +1,10 @@
 import clsx from "clsx";
+import { useContext } from "react";
+import { BookMarked, Github, HeartIcon, SatelliteDish } from "lucide-react";
 import { link as linkStyles } from "@heroui/theme";
 import ciber from "../assets/ciber.png";
 import {
+  Button,
   Link,
   Navbar as NextUINavbar,
   NavbarBrand,
@@ -9,13 +12,17 @@ import {
   NavbarItem,
   NavbarMenu,
   NavbarMenuItem,
-  NavbarMenuToggle,
+  NavbarMenuToggle
 } from "@heroui/react";
 
 import { siteConfig } from "@/config/site";
 import { ThemeSwitch } from "@/components/theme-switch";
+import { Logo } from "@/assets/icons/logo";
+import { AuthContext } from "@/contexts/Auth.tsx";
 
 export const Navbar = () => {
+  const { session } = useContext(AuthContext);
+
   return (
     <NextUINavbar style={{backgroundColor: '#000', opacity: '80%'}} maxWidth="xl" position="sticky">
       <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
