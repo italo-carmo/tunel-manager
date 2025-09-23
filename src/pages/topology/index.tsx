@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useEffect, useMemo, useRef, useState } from "react";
 import useAgents from "@/hooks/useAgents.ts";
 import useListeners from "@/hooks/useListeners.ts";
 import type { LigoloAgent } from "@/types/agents.ts";
 import type { Listener } from "@/types/listeners.ts";
 import ciber from "../../assets/ciber.png";
+
 type Vec2 = { x: number; y: number };
 
 type Node = {
@@ -38,6 +40,8 @@ const COL_X = [160, 560, 960]; // Proxy | meio | direita
 const PIN_OFFSET = 28;
 const TUNNEL_COLOR = "rgba(100,116,139,0.85)"; // slate-500
 const TUNNEL_WIDTH = 10;
+// distância entre túneis paralelos do mesmo par
+const PARALLEL_GAP = 14;
 
 // helpers -----------------------------------------------------------------
 function asArray<T = unknown>(val: unknown): T[] {
@@ -194,8 +198,18 @@ export default function Topology() {
   );
   const nodesById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes]);
 
+  // -------------------- CONEXÕES (com linhas paralelas) -------------------
   const connections = useMemo<Connection[]>(() => {
-    const result: Connection[] = [];
+    type BaseConn = {
+      id: string;
+      port: number | null;
+      from: Vec2;
+      to: Vec2;
+      srcId: string;
+      dstId: string;
+    };
+
+    const base: BaseConn[] = [];
     const nodeIdForHost = (host: string | null) => {
       if (!host) return null;
       const agentId = ipToAgent.get(host);
@@ -207,20 +221,72 @@ export default function Topology() {
       const src = parseHostPort(listener?.ListenerAddr);
       const dst = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
       const port = dst.port ?? src.port ?? null;
+
       const srcId = nodeIdForHost(src.host ?? null);
       const dstId = nodeIdForHost(dst.host ?? null);
       if (!srcId || !dstId) return;
+
       const srcNode = nodesById[srcId];
       const dstNode = nodesById[dstId];
       if (!srcNode || !dstNode) return;
+
       const from = edgePoint(srcNode.center, dstNode.center);
       const to = edgePoint(dstNode.center, srcNode.center);
-      result.push({ id: `conn-${index}`, port, from, to });
+
+      base.push({
+        id: `conn-${index}`,
+        port,
+        from,
+        to,
+        // padroniza a “ordem” para agrupar (par não-direcionado)
+        srcId: srcId < dstId ? srcId : dstId,
+        dstId: srcId < dstId ? dstId : srcId,
+      });
     });
 
-    return result;
+    // agrupa por par de nós (independente da direção)
+    const groups = new Map<string, BaseConn[]>();
+    for (const c of base) {
+      const key = `${c.srcId}|${c.dstId}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(c);
+    }
+
+    // aplica deslocamento perpendicular para paralelizar
+    const finalConns: Connection[] = [];
+    for (const [, arr] of groups.entries()) {
+      // ordena por porta só para ter um posicionamento estável
+      arr.sort((a, b) => (a.port ?? 0) - (b.port ?? 0));
+      const n = arr.length;
+      const middle = (n - 1) / 2;
+
+      arr.forEach((c, i) => {
+        const dx = c.to.x - c.from.x;
+        const dy = c.to.y - c.from.y;
+        const len = Math.hypot(dx, dy) || 1;
+        // vetor normal (perpendicular) à linha
+        const nx = -dy / len;
+        const ny = dx / len;
+
+        // deslocamento relativo à posição na fila (…,-1,0,+1,…)
+        const k = (i - middle) * PARALLEL_GAP;
+
+        const shiftedFrom = { x: c.from.x + nx * k, y: c.from.y + ny * k };
+        const shiftedTo = { x: c.to.x + nx * k, y: c.to.y + ny * k };
+
+        finalConns.push({
+          id: `${c.id}-p${c.port ?? "na"}`,
+          port: c.port,
+          from: shiftedFrom,
+          to: shiftedTo,
+        });
+      });
+    }
+
+    return finalConns;
   }, [listenerList, nodesById, ipToAgent]);
 
+  // --------- pins nas entradas/saídas (colados nas bordas) ---------------
   const portPins = useMemo<PortPin[]>(() => {
     const pins: PortPin[] = [];
     connections.forEach((conn) => {
@@ -271,11 +337,11 @@ export default function Topology() {
   // UI --------------------------------------------------------------------
   return (
     <div className="p-8">
-      <div style={{display: 'flex', alignItems: 'center'}}>
-      <h1 className="text-2xl font-semibold mb-6">Topologia</h1>
-      <img style={{marginLeft:10}} src={ciber} alt="Ciber" className="mb-6 h-12 object-contain" />
-
+      <div style={{ display: "flex", alignItems: "center" }}>
+        <h1 className="text-2xl font-semibold mb-6">Topologia</h1>
+        <img style={{ marginLeft: 10 }} src={ciber} alt="Ciber" className="mb-6 h-12 object-contain" />
       </div>
+
       <div ref={stageRef} className="relative w-full h-[460px] rounded-xl border bg-white">
         {/* conexões */}
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
@@ -332,7 +398,6 @@ export default function Topology() {
           })}
         </svg>
 
-
         {/* nodes */}
         {nodes.map((n) => (
           <div
@@ -360,8 +425,9 @@ export default function Topology() {
           </div>
         ))}
       </div>
+
       <p className="mt-3 text-xs text-slate-500">
-        Dica: arraste as caixas livremente para reorganizar — os túneis se ajustam automaticamente.
+        Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam automaticamente.
       </p>
     </div>
   );
