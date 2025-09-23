@@ -20,7 +20,7 @@ import {
   SelectItem,
 } from "@heroui/react";
 import { EthernetPort } from "lucide-react";
-import { useDragControls } from "framer-motion";
+import { motion, useDragControls } from "framer-motion";
 import { useApi } from "@/hooks/useApi.ts";
 import { LigoloAgent } from "@/types/agents.ts";
 import ErrorContext from "@/contexts/Error.tsx";
@@ -138,7 +138,7 @@ export function ListenerCreationModal({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       event.preventDefault();
-      dragControls.start(event);
+      dragControls.start(event.nativeEvent);
     },
     [dragControls],
   );
@@ -148,16 +148,16 @@ export function ListenerCreationModal({
       isOpen={isOpen}
       placement="top-center"
       onOpenChange={onOpenChange}
-      motionProps={{
-        drag: true,
-        dragControls,
-        dragListener: false,
-        dragMomentum: false,
-      }}
     >
       <ModalContent>
         {(onClose) => (
-          <>
+          <motion.div
+            drag
+            dragControls={dragControls}
+            dragListener={false}
+            dragMomentum={false}
+            className="pointer-events-auto"
+          >
             <ModalHeader
               className="flex flex-col gap-1 cursor-move select-none active:cursor-grabbing"
               onPointerDown={handleHeaderPointerDown}
@@ -278,7 +278,7 @@ export function ListenerCreationModal({
                 Add listener
               </Button>
             </ModalFooter>
-          </>
+          </motion.div>
         )}
       </ModalContent>
     </Modal>
