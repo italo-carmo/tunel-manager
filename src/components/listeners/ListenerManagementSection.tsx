@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   Button,
   CircularProgress,
@@ -17,7 +17,7 @@ import clsx from "clsx";
 
 import { ListenerCreationModal } from "@/pages/listeners/modal.tsx";
 import { useApi } from "@/hooks/useApi.ts";
-import type { LigoloListeners } from "@/types/listeners.ts";
+import type { LigoloListeners, Listener } from "@/types/listeners.ts";
 
 interface ListenerManagementSectionProps {
   listeners?: LigoloListeners;
@@ -37,8 +37,23 @@ export function ListenerManagementSection({
   const { del } = useApi();
   const { onOpenChange, onOpen, isOpen } = useDisclosure();
 
+  const normalizedListeners = useMemo<Listener[]>(() => {
+    if (!listeners) return [];
+    const items = Array.isArray(listeners)
+      ? [...listeners]
+      : Object.values(listeners);
+
+    return items.sort((a, b) => {
+      if (a.ListenerID !== b.ListenerID) {
+        return a.ListenerID - b.ListenerID;
+      }
+
+      return a.Agent.localeCompare(b.Agent);
+    });
+  }, [listeners]);
+
   const deleteListener = useCallback(
-    (listener: LigoloListeners[number]) => async () => {
+    (listener: Listener) => async () => {
       await del("api/v1/listeners", {
         agentId: listener.AgentID,
         listenerId: listener.ListenerID,
@@ -84,38 +99,34 @@ export function ListenerManagementSection({
             loadingState={loadingState}
             loadingContent={<CircularProgress aria-label="Loading..." size="sm" />}
           >
-            <>
-              {listeners
-                ? Object.entries(listeners).map(([row, listener]) => (
-                    <TableRow key={row}>
-                      <TableCell>{listener.ListenerID}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <p className="text-bold text-sm">{listener.Agent}</p>
-                          <p className="text-bold text-sm text-default-400">
-                            {listener.RemoteAddr}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>{listener.Network}</TableCell>
-                      <TableCell>{listener.ListenerAddr}</TableCell>
-                      <TableCell>{listener.RedirectAddr}</TableCell>
-                      <TableCell>
-                        <div className="relative flex items-center gap-2">
-                          <Tooltip content="Remove listener" color="danger">
-                            <span
-                              className="cursor-pointer text-lg text-danger active:opacity-50"
-                              onClick={deleteListener(listener)}
-                            >
-                              <CircleX />
-                            </span>
-                          </Tooltip>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                : null}
-            </>
+            {normalizedListeners.map((listener) => (
+              <TableRow key={listener.ListenerID ?? listener.Agent}>
+                <TableCell>{listener.ListenerID}</TableCell>
+                <TableCell>
+                  <div className="flex flex-col">
+                    <p className="text-bold text-sm">{listener.Agent}</p>
+                    <p className="text-bold text-sm text-default-400">
+                      {listener.RemoteAddr}
+                    </p>
+                  </div>
+                </TableCell>
+                <TableCell>{listener.Network}</TableCell>
+                <TableCell>{listener.ListenerAddr}</TableCell>
+                <TableCell>{listener.RedirectAddr}</TableCell>
+                <TableCell>
+                  <div className="relative flex items-center gap-2">
+                    <Tooltip content="Remove listener" color="danger">
+                      <span
+                        className="cursor-pointer text-lg text-danger active:opacity-50"
+                        onClick={deleteListener(listener)}
+                      >
+                        <CircleX />
+                      </span>
+                    </Tooltip>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </section>
