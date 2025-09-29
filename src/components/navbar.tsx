@@ -67,7 +67,7 @@ export const Navbar = () => {
         {session && (
           <NavbarItem>
             <Button color="danger" onPress={handleLogout} size="sm" variant="solid">
-              Logout
+              <span style={{color: '#fff', fontWeight: 'bold'}}>Logout</span>
             </Button>
           </NavbarItem>
         )}
@@ -94,7 +94,7 @@ export const Navbar = () => {
           {session && (
             <NavbarMenuItem>
               <Button color="danger" fullWidth onPress={handleLogout} size="sm">
-                Logout
+                <span color="#fff">Logout</span>
               </Button>
             </NavbarMenuItem>
           )}

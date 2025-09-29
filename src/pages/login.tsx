@@ -5,6 +5,7 @@ import { Logo } from "@/assets/icons/logo.tsx";
 import { ThemeSwitch } from "@/components/theme-switch.tsx";
 import { AuthContext } from "@/contexts/Auth.tsx";
 import ErrorContext from "@/contexts/Error.tsx";
+import ciber from "../assets/ciber.png";
 import { InvalidApiUrlError } from "@/errors/login.ts";
 import {
   Alert,
@@ -53,23 +54,21 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="h-[100vh] flex items-center">
+    <div style={{backgroundColor: '#eee'}} className="h-[100vh] flex items-center">
       <div className="absolute top-0 right-0 p-4">
         <ThemeSwitch />
       </div>
       <div className="flex flex-col w-full justify-center">
         <div className="inline-flex  text-default-foreground items-center gap-1 justify-center mb-2 select-none">
-          <Logo size={50} />
+              <img style={{ marginLeft: 10 }} src={ciber} alt="Ciber" className="h-12 object-contain" />
           <p className="font-bold font-[500] text-xl tracking-wider flex items-center gap-[1px] opacity-90 hover:opacity-100 cursor-pointer">
-            Ligolo{" "}
-            <Minus size={10} strokeWidth={4} className="relative top-[3px]" />{" "}
-            ng
+            Ligolo-ng Tunnel Manager
           </p>
         </div>
         <div className="w-[600px] mx-auto my-4 flex items-center justify-center px-2">
-          <Alert variant="flat" title="Log in to your account to continue" />
+          <Alert variant="flat" title="Faça o login para continuar" />
         </div>
-        <Card className="w-[600px] flex m-auto p-6">
+        <Card style={{backgroundColor: '#000', opacity: 0.8}} className="w-[600px] flex m-auto p-6">
           <Form validationBehavior="native" onSubmit={handleSubmit}>
             <Input
               size="sm"
@@ -100,6 +99,7 @@ export default function LoginPage() {
             />
             <Button
               className="mt-2 w-full gap-0 text-opacity-50"
+              style={{backgroundColor: '#ffcc29', color: '#000'}}
               size="sm"
               type="submit"
               disabled={loading}
@@ -107,10 +107,10 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <CircularProgress className="scale-50" color="default" />
-                  Authenticating
+                  Fazendo login
                 </>
               ) : (
-                "Authenticate"
+                "Entrar"
               )}
             </Button>
           </Form>
