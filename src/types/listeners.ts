@@ -1,4 +1,6 @@
-export type LigoloListeners = Listener[]
+export type ListenerMap = Record<string, Listener>;
+
+export type LigoloListeners = Listener[] | ListenerMap;
 
 export interface Listener {
     ListenerID: number
