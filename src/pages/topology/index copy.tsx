@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ListenerManagementSection } from "@/components/listeners/ListenerManagementSection.tsx";
 import useAgents from "@/hooks/useAgents.ts";
 import useListeners from "@/hooks/useListeners.ts";
+import { useTheme } from "@/hooks/useTheme";
 import type { LigoloAgent } from "@/types/agents.ts";
 import type { Listener } from "@/types/listeners.ts";
 
@@ -35,14 +36,19 @@ type PortPin = {
 };
 
 // layout base
+const BOX = { w: 220, h: 150 };
 const ROW_Y = 240;
-const BOX = { w: 220, h: 140 };
+const COLUMN_GAP = BOX.h + 80;
 const COL_X = [160, 560, 960]; // Proxy | meio | direita
-const PIN_OFFSET = 28;
-const TUNNEL_COLOR = "rgba(100,116,139,0.85)"; // slate-500
-const TUNNEL_WIDTH = 10;
+const PIN_OFFSET = 15;
+const TUNNEL_COLOR_LIGHT = "rgba(100,116,139,0.85)"; // slate-500
+const TUNNEL_COLOR_DARK = "rgba(148,163,184,0.7)"; // slate-400
+const PORT_FILL_LIGHT = "#ffcc29";
+const PORT_FILL_DARK = "#facc15";
+const TUNNEL_WIDTH = 8;
 // distância entre túneis paralelos do mesmo par
 const PARALLEL_GAP = 14;
+const POS_STORAGE_KEY = "topology-node-positions";
 
 // helpers -----------------------------------------------------------------
 function asArray<T = unknown>(val: unknown): T[] {
@@ -113,6 +119,28 @@ function createPortPin(
 }
 
 // componente ---------------------------------------------------------------
+function loadStoredPositions(): Record<string, Vec2> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(POS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, Vec2> = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([id, value]) => {
+      if (!value || typeof value !== "object") return;
+      const { x, y } = value as Partial<Vec2>;
+      if (typeof x !== "number" || typeof y !== "number") return;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      out[id] = { x, y };
+    });
+    return out;
+  } catch (error) {
+    console.error("Failed to parse stored topology positions", error);
+    return {};
+  }
+}
+
 export default function Topology() {
   const { agents } = useAgents();
   const {
@@ -120,6 +148,9 @@ export default function Topology() {
     loading: listenersLoading,
     mutate: mutateListeners,
   } = useListeners();
+  const { isDark } = useTheme();
+  const tunnelColor = isDark ? TUNNEL_COLOR_DARK : TUNNEL_COLOR_LIGHT;
+  const portFill = isDark ? PORT_FILL_DARK : PORT_FILL_LIGHT;
   const listenerList = useMemo(
     () => asArray<Partial<Listener>>(listeners),
     [listeners],
@@ -138,62 +169,90 @@ export default function Topology() {
 
   // monta nós (position inicial em colunas)
   const initialNodes = useMemo<Node[]>(() => {
-    const res: Node[] = [];
-
-    // Proxy(s): redirect que não pertence a agente
     const proxyIPs = new Set<string>();
     listenerList.forEach((listener) => {
       const { host: target } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
       if (target && !ipToAgent.has(target)) proxyIPs.add(target);
     });
-    [...proxyIPs].forEach((ip) =>
-      res.push({
+
+    const layoutColumn = (items: Omit<Node, "center">[], colIndex: number) =>
+      items.map((item, index) => ({
+        ...item,
+        center: { x: COL_X[colIndex], y: ROW_Y + index * COLUMN_GAP },
+      }));
+
+    const proxyNodes = layoutColumn(
+      [...proxyIPs].map<Omit<Node, "center">>((ip) => ({
         id: `proxy-${ip}`,
         kind: "proxy",
         label: "PROXY",
         ips: [ip],
-        center: { x: COL_X[0], y: ROW_Y },
-      }),
+      })),
+      0,
     );
 
-    // Agents
+    const agentsWithProxy: Omit<Node, "center">[] = [];
+    const regularAgents: Omit<Node, "center">[] = [];
+
     Object.entries<LigoloAgent>(agents ?? {}).forEach(([agentId, agent]) => {
-      const ips: string[] = [];
+      const ipSet = new Set<string>();
       (agent.Network ?? []).forEach((network) => {
-        ips.push(...uniqueIPv4s(network?.Addresses));
+        uniqueIPv4s(network?.Addresses).forEach((ip) => ipSet.add(ip));
       });
+      const ips = [...ipSet];
       const hasToProxy = listenerList.some((listener) => {
         const { host: src } = parseHostPort(listener?.ListenerAddr);
         const { host: dst } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
         return src && ipToAgent.get(src) === agentId && dst && proxyIPs.has(dst);
       });
-      const x = hasToProxy ? COL_X[1] : COL_X[2];
-      res.push({
+
+      const targetArray = hasToProxy ? agentsWithProxy : regularAgents;
+      targetArray.push({
         id: `agent-${agentId}`,
         kind: "agent",
         label: agent.Name || agentId,
-        ips: ips.slice(0, 2),
-        center: { x, y: ROW_Y },
+        ips,
       });
     });
 
-    return res;
+    return [
+      ...proxyNodes,
+      ...layoutColumn(agentsWithProxy, 1),
+      ...layoutColumn(regularAgents, 2),
+    ];
   }, [agents, listenerList, ipToAgent]);
 
+  const storedPositions = useMemo(loadStoredPositions, []);
+
   // positions (draggable)
-  const [pos, setPos] = useState<Record<string, Vec2>>(
-    Object.fromEntries(initialNodes.map((n) => [n.id, n.center])),
-  );
+  const [pos, setPos] = useState<Record<string, Vec2>>(() => {
+    const base = Object.fromEntries(initialNodes.map((n) => [n.id, n.center]));
+    return { ...base, ...storedPositions };
+  });
   // inicializa/atualiza se nós mudarem (ex.: reconexões)
   useEffect(() => {
     setPos((prev) => {
-      const next = { ...prev };
+      const next: Record<string, Vec2> = {};
       initialNodes.forEach((n) => {
-        if (!next[n.id]) next[n.id] = n.center;
+        next[n.id] = prev[n.id] ?? storedPositions[n.id] ?? n.center;
       });
       return next;
     });
-  }, [initialNodes]);
+  }, [initialNodes, storedPositions]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const toStore: Record<string, Vec2> = {};
+    initialNodes.forEach((node) => {
+      const current = pos[node.id];
+      if (!current) return;
+      const x = Number(current.x);
+      const y = Number(current.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      toStore[node.id] = { x, y };
+    });
+    localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(toStore));
+  }, [pos, initialNodes]);
 
   // nodes merged with live positions
   const nodes: Node[] = useMemo(
@@ -346,8 +405,10 @@ export default function Topology() {
   return (
     <div className="flex flex-col gap-8 py-6 pb-12">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-slate-900">Topologia</h1>
-        <p className="text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+          Topologia
+        </h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
         </p>
       </div>
@@ -362,8 +423,8 @@ export default function Topology() {
       <section className="flex flex-col gap-3">
         <div
           ref={stageRef}
-          className="relative w-full min-h-[460px] rounded-xl border bg-white shadow-sm"
-          style={{ minHeight: 520, height: "clamp(420px, 65vh, 720px)" }}
+          className="relative w-full min-h-[460px] rounded-xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-900"
+          style={{ minHeight: 900, height: "clamp(420px, 65vh, 720px)" }}
         >
         {/* conexões */}
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
@@ -375,7 +436,7 @@ export default function Topology() {
               x2={conn.to.x}
               y2={conn.to.y}
               strokeWidth={TUNNEL_WIDTH}
-              stroke={TUNNEL_COLOR}
+              stroke={tunnelColor}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -383,8 +444,8 @@ export default function Topology() {
 
           {portPins.map((p) => {
             const W = 40;
-            const H = 20;
-            const R = 8;
+            const H = 12;
+            const R = 5;
             const rectX =
               p.orientation === "horizontal"
                 ? p.anchor === "end"
@@ -403,7 +464,7 @@ export default function Topology() {
                   width={W}
                   height={H}
                   rx={R}
-                  fill="#ffcc29"
+                  fill={portFill}
                   opacity="0.85"
                 />
                 <text
@@ -411,7 +472,7 @@ export default function Topology() {
                   y={cy}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  className="fill-slate-800 font-mono text-[11px]"
+                  className="font-mono text-[11px] fill-slate-800 dark:fill-slate-900"
                 >
                   {p.text}
                 </text>
@@ -428,19 +489,25 @@ export default function Topology() {
             className="absolute -translate-x-1/2 -translate-y-1/2 select-none cursor-grab active:cursor-grabbing"
             style={{ left: n.center.x, top: n.center.y, width: BOX.w, height: BOX.h }}
           >
-            <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl">
-              <div className="flex h-full flex-col items-center justify-center gap-1 px-4">
-                {/* chips de IPs */}
-                {n.ips[0] && (
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-                    {n.ips[0]}
-                  </span>
-                )}
-                <div className="text-base font-semibold text-slate-900">{n.label}</div>
-                {n.ips[1] && (
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-                    {n.ips[1]}
-                  </span>
+            <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-3">
+                <div
+                  style={{ fontSize: 12 }}
+                  className="text-center text-base font-semibold text-slate-900 dark:text-slate-100"
+                >
+                  {n.label}
+                </div>
+                {n.ips.length > 0 && (
+                  <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
+                    {n.ips.map((ip) => (
+                      <span
+                        key={ip}
+                        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
+                      >
+                        {ip}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -448,7 +515,7 @@ export default function Topology() {
         ))}
         </div>
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam
           automaticamente.
         </p>
