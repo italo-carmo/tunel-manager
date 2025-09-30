@@ -99,6 +99,55 @@ export function ListenerManagementSection({
     return match ? Number(match[1]) : undefined;
   }, []);
 
+  const safeStringCompare = useCallback((a?: string | null, b?: string | null) => {
+    if (a === b) return 0;
+    if (a === undefined || a === null) return 1;
+    if (b === undefined || b === null) return -1;
+    return a.localeCompare(b);
+  }, []);
+
+  const fallbackListenerCompare = useCallback(
+    (a: Listener, b: Listener) => {
+      const agentComparison = safeStringCompare(a.Agent, b.Agent);
+      if (agentComparison !== 0) return agentComparison;
+
+      const listenerAddrComparison = safeStringCompare(
+        a.ListenerAddr,
+        b.ListenerAddr,
+      );
+      if (listenerAddrComparison !== 0) return listenerAddrComparison;
+
+      const redirectAddrComparison = safeStringCompare(
+        a.RedirectAddr,
+        b.RedirectAddr,
+      );
+      if (redirectAddrComparison !== 0) return redirectAddrComparison;
+
+      return a.ListenerID - b.ListenerID;
+    },
+    [safeStringCompare],
+  );
+
+  const comparePortsAsc = useCallback(
+    (a?: number, b?: number) => {
+      if (a === b) return 0;
+      if (a === undefined) return 1;
+      if (b === undefined) return -1;
+      return a - b;
+    },
+    [],
+  );
+
+  const comparePortsDesc = useCallback(
+    (a?: number, b?: number) => {
+      if (a === b) return 0;
+      if (a === undefined) return 1;
+      if (b === undefined) return -1;
+      return b - a;
+    },
+    [],
+  );
+
   const filteredListeners = useMemo(() => {
     return normalizedListeners.filter((listener) => {
       if (selectedAgent !== "all" && listener.Agent !== selectedAgent) {
@@ -121,34 +170,58 @@ export function ListenerManagementSection({
 
   const sortedListeners = useMemo(() => {
     const sorters: Record<SortOption, (a: Listener, b: Listener) => number> = {
-      "listenerId-desc": (a, b) => b.ListenerID - a.ListenerID,
-      "listenerId-asc": (a, b) => a.ListenerID - b.ListenerID,
-      "agent-asc": (a, b) => a.Agent.localeCompare(b.Agent),
-      "agent-desc": (a, b) => b.Agent.localeCompare(a.Agent),
+      "listenerId-desc": (a, b) => {
+        const diff = b.ListenerID - a.ListenerID;
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
+      },
+      "listenerId-asc": (a, b) => {
+        const diff = a.ListenerID - b.ListenerID;
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
+      },
+      "agent-asc": (a, b) => {
+        const diff = safeStringCompare(a.Agent, b.Agent);
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
+      },
+      "agent-desc": (a, b) => {
+        const diff = safeStringCompare(b.Agent, a.Agent);
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
+      },
       "listenerPort-asc": (a, b) => {
-        const aPort = extractPort(a.ListenerAddr) ?? Number.POSITIVE_INFINITY;
-        const bPort = extractPort(b.ListenerAddr) ?? Number.POSITIVE_INFINITY;
-        return aPort - bPort;
+        const aPort = extractPort(a.ListenerAddr);
+        const bPort = extractPort(b.ListenerAddr);
+        const diff = comparePortsAsc(aPort, bPort);
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
       },
       "listenerPort-desc": (a, b) => {
-        const aPort = extractPort(a.ListenerAddr) ?? Number.NEGATIVE_INFINITY;
-        const bPort = extractPort(b.ListenerAddr) ?? Number.NEGATIVE_INFINITY;
-        return bPort - aPort;
+        const aPort = extractPort(a.ListenerAddr);
+        const bPort = extractPort(b.ListenerAddr);
+        const diff = comparePortsDesc(aPort, bPort);
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
       },
       "redirectPort-asc": (a, b) => {
-        const aPort = extractPort(a.RedirectAddr) ?? Number.POSITIVE_INFINITY;
-        const bPort = extractPort(b.RedirectAddr) ?? Number.POSITIVE_INFINITY;
-        return aPort - bPort;
+        const aPort = extractPort(a.RedirectAddr);
+        const bPort = extractPort(b.RedirectAddr);
+        const diff = comparePortsAsc(aPort, bPort);
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
       },
       "redirectPort-desc": (a, b) => {
-        const aPort = extractPort(a.RedirectAddr) ?? Number.NEGATIVE_INFINITY;
-        const bPort = extractPort(b.RedirectAddr) ?? Number.NEGATIVE_INFINITY;
-        return bPort - aPort;
+        const aPort = extractPort(a.RedirectAddr);
+        const bPort = extractPort(b.RedirectAddr);
+        const diff = comparePortsDesc(aPort, bPort);
+        return diff !== 0 ? diff : fallbackListenerCompare(a, b);
       },
     };
 
     return [...filteredListeners].sort(sorters[sortOption]);
-  }, [extractPort, filteredListeners, sortOption]);
+  }, [
+    comparePortsAsc,
+    comparePortsDesc,
+    extractPort,
+    fallbackListenerCompare,
+    filteredListeners,
+    safeStringCompare,
+    sortOption,
+  ]);
 
   const deleteListener = useCallback(
     (listener: Listener) => async () => {
