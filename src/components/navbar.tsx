@@ -27,7 +27,15 @@ export const Navbar = () => {
   }, [logOut, navigate]);
 
   return (
-    <NextUINavbar style={{backgroundColor: '#000', opacity: '80%'}} maxWidth="xl" position="sticky">
+    <NextUINavbar
+      style={{ backgroundColor: "#000", opacity: "80%" }}
+      maxWidth="full"
+      position="sticky"
+      classNames={{
+        base: "mx-auto w-full px-0",
+        wrapper: "mx-auto w-full max-w-7xl px-6",
+      }}
+    >
       <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
         <NavbarBrand className="gap-3 max-w-fit">
           <RouterLink className="flex items-center justify-start gap-1" to="/">

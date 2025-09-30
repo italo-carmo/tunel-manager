@@ -1,7 +1,10 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Button,
   CircularProgress,
+  Input,
+  Select,
+  SelectItem,
   Table,
   TableBody,
   TableCell,
@@ -27,6 +30,27 @@ interface ListenerManagementSectionProps {
   title?: string;
 }
 
+type SortOption =
+  | "listenerId-desc"
+  | "listenerId-asc"
+  | "agent-asc"
+  | "agent-desc"
+  | "listenerPort-asc"
+  | "listenerPort-desc"
+  | "redirectPort-asc"
+  | "redirectPort-desc";
+
+const SORT_OPTIONS: { label: string; value: SortOption }[] = [
+  { label: "ID (maior primeiro)", value: "listenerId-desc" },
+  { label: "ID (menor primeiro)", value: "listenerId-asc" },
+  { label: "Agente (A-Z)", value: "agent-asc" },
+  { label: "Agente (Z-A)", value: "agent-desc" },
+  { label: "Porta de escuta (crescente)", value: "listenerPort-asc" },
+  { label: "Porta de escuta (decrescente)", value: "listenerPort-desc" },
+  { label: "Porta de redirecionamento (crescente)", value: "redirectPort-asc" },
+  { label: "Porta de redirecionamento (decrescente)", value: "redirectPort-desc" },
+];
+
 export function ListenerManagementSection({
   listeners,
   loading = false,
@@ -37,20 +61,94 @@ export function ListenerManagementSection({
   const { del } = useApi();
   const { onOpenChange, onOpen, isOpen } = useDisclosure();
 
+  const [selectedAgent, setSelectedAgent] = useState<string>("all");
+  const [portFilter, setPortFilter] = useState<string>("");
+  const [sortOption, setSortOption] = useState<SortOption>("listenerId-desc");
+
   const normalizedListeners = useMemo<Listener[]>(() => {
     if (!listeners) return [];
     const items = Array.isArray(listeners)
       ? [...listeners]
       : Object.values(listeners);
 
-    return items.sort((a, b) => {
-      if (a.ListenerID !== b.ListenerID) {
-        return a.ListenerID - b.ListenerID;
+    return items;
+  }, [listeners]);
+
+  const agentOptions = useMemo(() => {
+    const uniqueAgents = new Set<string>();
+    normalizedListeners.forEach((listener) => {
+      if (listener.Agent) {
+        uniqueAgents.add(listener.Agent);
+      }
+    });
+
+    return Array.from(uniqueAgents).sort((a, b) => a.localeCompare(b));
+  }, [normalizedListeners]);
+
+  const agentItems = useMemo(
+    () => [
+      { key: "all", label: "Todos os agentes" },
+      ...agentOptions.map((agent) => ({ key: agent, label: agent })),
+    ],
+    [agentOptions],
+  );
+
+  const extractPort = useCallback((address?: string) => {
+    if (!address) return undefined;
+    const match = address.match(/:(\d+)$/);
+    return match ? Number(match[1]) : undefined;
+  }, []);
+
+  const filteredListeners = useMemo(() => {
+    return normalizedListeners.filter((listener) => {
+      if (selectedAgent !== "all" && listener.Agent !== selectedAgent) {
+        return false;
       }
 
-      return a.Agent.localeCompare(b.Agent);
+      if (portFilter.trim().length > 0) {
+        const normalizedPort = portFilter.trim();
+        if (
+          !listener.ListenerAddr?.includes(normalizedPort) &&
+          !listener.RedirectAddr?.includes(normalizedPort)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [listeners]);
+  }, [normalizedListeners, portFilter, selectedAgent]);
+
+  const sortedListeners = useMemo(() => {
+    const sorters: Record<SortOption, (a: Listener, b: Listener) => number> = {
+      "listenerId-desc": (a, b) => b.ListenerID - a.ListenerID,
+      "listenerId-asc": (a, b) => a.ListenerID - b.ListenerID,
+      "agent-asc": (a, b) => a.Agent.localeCompare(b.Agent),
+      "agent-desc": (a, b) => b.Agent.localeCompare(a.Agent),
+      "listenerPort-asc": (a, b) => {
+        const aPort = extractPort(a.ListenerAddr) ?? Number.POSITIVE_INFINITY;
+        const bPort = extractPort(b.ListenerAddr) ?? Number.POSITIVE_INFINITY;
+        return aPort - bPort;
+      },
+      "listenerPort-desc": (a, b) => {
+        const aPort = extractPort(a.ListenerAddr) ?? Number.NEGATIVE_INFINITY;
+        const bPort = extractPort(b.ListenerAddr) ?? Number.NEGATIVE_INFINITY;
+        return bPort - aPort;
+      },
+      "redirectPort-asc": (a, b) => {
+        const aPort = extractPort(a.RedirectAddr) ?? Number.POSITIVE_INFINITY;
+        const bPort = extractPort(b.RedirectAddr) ?? Number.POSITIVE_INFINITY;
+        return aPort - bPort;
+      },
+      "redirectPort-desc": (a, b) => {
+        const aPort = extractPort(a.RedirectAddr) ?? Number.NEGATIVE_INFINITY;
+        const bPort = extractPort(b.RedirectAddr) ?? Number.NEGATIVE_INFINITY;
+        return bPort - aPort;
+      },
+    };
+
+    return [...filteredListeners].sort(sorters[sortOption]);
+  }, [extractPort, filteredListeners, sortOption]);
 
   const deleteListener = useCallback(
     (listener: Listener) => async () => {
@@ -85,6 +183,63 @@ export function ListenerManagementSection({
           </Button>
         </div>
 
+        <div className="rounded-large border border-default-200 bg-content1/60 p-4 shadow-sm backdrop-blur">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-default-500">
+            <span>
+              Exibindo {sortedListeners.length} de {normalizedListeners.length} listeners
+            </span>
+            {(selectedAgent !== "all" || portFilter) && (
+              <Button
+                size="sm"
+                variant="light"
+                onPress={() => {
+                  setSelectedAgent("all");
+                  setPortFilter("");
+                }}
+              >
+                Limpar filtros
+              </Button>
+            )}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Select
+              label="Filtrar por agente"
+              placeholder="Todos os agentes"
+              selectedKeys={new Set([selectedAgent])}
+              onSelectionChange={(keys) => {
+                const key = keys.currentKey;
+                setSelectedAgent((key as string | null) ?? "all");
+              }}
+              items={agentItems}
+            >
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+            </Select>
+
+            <Input
+              label="Filtrar por porta"
+              placeholder="Ex.: 443"
+              value={portFilter}
+              onValueChange={setPortFilter}
+              description="Busca em endereços de escuta e redirecionamento"
+            />
+
+            <Select
+              label="Ordenar"
+              selectedKeys={new Set([sortOption])}
+              onSelectionChange={(keys) => {
+                const key = keys.currentKey as SortOption | null;
+                if (key) {
+                  setSortOption(key);
+                }
+              }}
+              items={SORT_OPTIONS}
+            >
+              {(item) => <SelectItem key={item.value}>{item.label}</SelectItem>}
+            </Select>
+          </div>
+        </div>
+
         <Table aria-label="Listener list">
           <TableHeader>
             <TableColumn>#</TableColumn>
@@ -99,9 +254,11 @@ export function ListenerManagementSection({
             loadingState={loadingState}
             loadingContent={<CircularProgress aria-label="Loading..." size="sm" />}
           >
-            {normalizedListeners.map((listener) => (
-              <TableRow key={listener.ListenerID ?? listener.Agent}>
-                <TableCell>{listener.ListenerID}</TableCell>
+            {sortedListeners.map((listener, index) => (
+              <TableRow key={`${listener.ListenerID}-${listener.Agent}`}>
+                <TableCell className="font-semibold text-default-500">
+                  #{index + 1}
+                </TableCell>
                 <TableCell>
                   <div className="flex flex-col">
                     <p className="text-bold text-sm">{listener.Agent}</p>
