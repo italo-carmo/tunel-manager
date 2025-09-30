@@ -54,14 +54,14 @@ export default function LoginPage() {
   );
 
   return (
-    <div style={{backgroundColor: '#eee'}} className="h-[100vh] flex items-center">
+    <div style={{backgroundColor: '#000'}} className="h-[100vh] flex items-center">
       <div className="absolute top-0 right-0 p-4">
         <ThemeSwitch />
       </div>
       <div className="flex flex-col w-full justify-center">
         <div className="inline-flex  text-default-foreground items-center gap-1 justify-center mb-2 select-none">
               <img style={{ marginLeft: 10 }} src={ciber} alt="Ciber" className="h-12 object-contain" />
-          <p className="font-bold font-[500] text-xl tracking-wider flex items-center gap-[1px] opacity-90 hover:opacity-100 cursor-pointer">
+          <p style={{color: '#fff'}} className="font-bold font-[500] text-xl tracking-wider flex items-center gap-[1px] opacity-90 hover:opacity-100 cursor-pointer">
             Ligolo-ng Tunnel Manager
           </p>
         </div>
@@ -81,7 +81,7 @@ export default function LoginPage() {
             />
             <Input
               size="sm"
-              placeholder="Username"
+              placeholder="Usuário"
               name="username"
               labelPlacement="outside"
               isRequired
@@ -92,7 +92,7 @@ export default function LoginPage() {
               size="sm"
               labelPlacement="outside"
               isRequired
-              placeholder="Enter your password"
+              placeholder="Senha"
               value={password}
               type="password"
               onValueChange={setPassword}
