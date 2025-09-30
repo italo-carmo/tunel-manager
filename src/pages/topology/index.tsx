@@ -36,8 +36,9 @@ type PortPin = {
 };
 
 // layout base
-const ROW_Y = 240;
 const BOX = { w: 220, h: 140 };
+const ROW_Y = 240;
+const COLUMN_GAP = BOX.h + 80;
 const COL_X = [160, 560, 960]; // Proxy | meio | direita
 const PIN_OFFSET = 28;
 const TUNNEL_COLOR_LIGHT = "rgba(100,116,139,0.85)"; // slate-500
@@ -47,6 +48,7 @@ const PORT_FILL_DARK = "#facc15";
 const TUNNEL_WIDTH = 10;
 // distância entre túneis paralelos do mesmo par
 const PARALLEL_GAP = 14;
+const POS_STORAGE_KEY = "topology-node-positions";
 
 // helpers -----------------------------------------------------------------
 function asArray<T = unknown>(val: unknown): T[] {
@@ -117,6 +119,28 @@ function createPortPin(
 }
 
 // componente ---------------------------------------------------------------
+function loadStoredPositions(): Record<string, Vec2> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(POS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, Vec2> = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([id, value]) => {
+      if (!value || typeof value !== "object") return;
+      const { x, y } = value as Partial<Vec2>;
+      if (typeof x !== "number" || typeof y !== "number") return;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      out[id] = { x, y };
+    });
+    return out;
+  } catch (error) {
+    console.error("Failed to parse stored topology positions", error);
+    return {};
+  }
+}
+
 export default function Topology() {
   const { agents } = useAgents();
   const {
@@ -145,25 +169,31 @@ export default function Topology() {
 
   // monta nós (position inicial em colunas)
   const initialNodes = useMemo<Node[]>(() => {
-    const res: Node[] = [];
-
-    // Proxy(s): redirect que não pertence a agente
     const proxyIPs = new Set<string>();
     listenerList.forEach((listener) => {
       const { host: target } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
       if (target && !ipToAgent.has(target)) proxyIPs.add(target);
     });
-    [...proxyIPs].forEach((ip) =>
-      res.push({
+
+    const layoutColumn = (items: Omit<Node, "center">[], colIndex: number) =>
+      items.map((item, index) => ({
+        ...item,
+        center: { x: COL_X[colIndex], y: ROW_Y + index * COLUMN_GAP },
+      }));
+
+    const proxyNodes = layoutColumn(
+      [...proxyIPs].map<Omit<Node, "center">>((ip) => ({
         id: `proxy-${ip}`,
         kind: "proxy",
         label: "PROXY",
         ips: [ip],
-        center: { x: COL_X[0], y: ROW_Y },
-      }),
+      })),
+      0,
     );
 
-    // Agents
+    const agentsWithProxy: Omit<Node, "center">[] = [];
+    const regularAgents: Omit<Node, "center">[] = [];
+
     Object.entries<LigoloAgent>(agents ?? {}).forEach(([agentId, agent]) => {
       const ipSet = new Set<string>();
       (agent.Network ?? []).forEach((network) => {
@@ -175,33 +205,54 @@ export default function Topology() {
         const { host: dst } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
         return src && ipToAgent.get(src) === agentId && dst && proxyIPs.has(dst);
       });
-      const x = hasToProxy ? COL_X[1] : COL_X[2];
-      res.push({
+
+      const targetArray = hasToProxy ? agentsWithProxy : regularAgents;
+      targetArray.push({
         id: `agent-${agentId}`,
         kind: "agent",
         label: agent.Name || agentId,
         ips,
-        center: { x, y: ROW_Y },
       });
     });
 
-    return res;
+    return [
+      ...proxyNodes,
+      ...layoutColumn(agentsWithProxy, 1),
+      ...layoutColumn(regularAgents, 2),
+    ];
   }, [agents, listenerList, ipToAgent]);
 
+  const storedPositions = useMemo(loadStoredPositions, []);
+
   // positions (draggable)
-  const [pos, setPos] = useState<Record<string, Vec2>>(
-    Object.fromEntries(initialNodes.map((n) => [n.id, n.center])),
-  );
+  const [pos, setPos] = useState<Record<string, Vec2>>(() => {
+    const base = Object.fromEntries(initialNodes.map((n) => [n.id, n.center]));
+    return { ...base, ...storedPositions };
+  });
   // inicializa/atualiza se nós mudarem (ex.: reconexões)
   useEffect(() => {
     setPos((prev) => {
-      const next = { ...prev };
+      const next: Record<string, Vec2> = {};
       initialNodes.forEach((n) => {
-        if (!next[n.id]) next[n.id] = n.center;
+        next[n.id] = prev[n.id] ?? storedPositions[n.id] ?? n.center;
       });
       return next;
     });
-  }, [initialNodes]);
+  }, [initialNodes, storedPositions]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const toStore: Record<string, Vec2> = {};
+    initialNodes.forEach((node) => {
+      const current = pos[node.id];
+      if (!current) return;
+      const x = Number(current.x);
+      const y = Number(current.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      toStore[node.id] = { x, y };
+    });
+    localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(toStore));
+  }, [pos, initialNodes]);
 
   // nodes merged with live positions
   const nodes: Node[] = useMemo(
