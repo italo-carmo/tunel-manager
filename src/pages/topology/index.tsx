@@ -364,7 +364,7 @@ export default function Topology() {
         <div
           ref={stageRef}
           className="relative w-full min-h-[460px] rounded-xl border bg-white shadow-sm"
-          style={{ minHeight: 520, height: "clamp(420px, 65vh, 720px)" }}
+          style={{ minHeight: 900, height: "clamp(420px, 65vh, 720px)" }}
         >
         {/* conexões */}
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
@@ -431,7 +431,7 @@ export default function Topology() {
           >
             <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl">
               <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-3">
-                <div className="text-base font-semibold text-slate-900 text-center">{n.label}</div>
+                <div style={{fontSize:12}} className="text-base font-semibold text-slate-900 text-center">{n.label}</div>
                 {n.ips.length > 0 && (
                   <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
                     {n.ips.map((ip) => (
