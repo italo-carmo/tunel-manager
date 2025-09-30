@@ -34,7 +34,8 @@ web:
     - http://127.0.0.1:8080
 ```
 Ao entrar na interface web:
-
+```
 API URL: http://127.0.0.1:8080
 Usuário: ligolo
 Senha: password
+```
