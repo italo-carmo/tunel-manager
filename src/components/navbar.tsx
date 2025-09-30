@@ -74,10 +74,7 @@ export const Navbar = () => {
             </Button>
           </NavbarItem>
         )}
-        <NavbarItem className="hidden sm:flex gap-2">
-          <span style={{color: '#ffcc29', fontWeight: 'bold'}}>Dark Mode</span>
-          <ThemeSwitch />
-        </NavbarItem>
+
       </NavbarContent>
 
       <NavbarContent className="sm:hidden basis-1 pl-4" justify="end">

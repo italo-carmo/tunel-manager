@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useEffect, useMemo, useRef, useState } from "react";
-
+import cifrao from "../../../public/cifrao.png";
+import hash from "../../../public/hash.png";
 import { ListenerManagementSection } from "@/components/listeners/ListenerManagementSection.tsx";
 import useAgents from "@/hooks/useAgents.ts";
 import useListeners from "@/hooks/useListeners.ts";
@@ -40,7 +41,7 @@ type PortPin = {
 };
 
 // layout base
-const BOX = { w: 220, h: 150 };
+const BOX = { w: 220, h: 190 };
 const ROW_Y = 240;
 const COLUMN_GAP = BOX.h + 80;
 const COL_X = [160, 560, 960]; // Proxy | meio | direita
@@ -539,12 +540,17 @@ export default function Topology() {
             style={{ left: n.center.x, top: n.center.y, width: BOX.w, height: BOX.h }}
           >
             <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
+              <div style={{marginTop:5, marginLeft:5}}>         
+                {n.label.includes('root') ? <img src={hash} width={30} /> : <img  width={30}  src={cifrao} />} 
+              </div>
+
               <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-3">
                 <div
                   style={{ fontSize: 12 }}
                   className="text-center text-base font-semibold text-slate-900 dark:text-slate-100"
                 >
-                  {n.label}
+       
+                {n.label}
                 </div>
                 {n.ips.length > 0 && (
                   <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
@@ -565,7 +571,7 @@ export default function Topology() {
         </div>
 
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam
+          Arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam
           automaticamente.
         </p>
       </section>
