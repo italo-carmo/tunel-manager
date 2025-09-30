@@ -1,7 +1,5 @@
 import * as React from "react";
 import { useCallback, useContext, useState } from "react";
-import { Minus } from "lucide-react";
-import { Logo } from "@/assets/icons/logo.tsx";
 import { ThemeSwitch } from "@/components/theme-switch.tsx";
 import { AuthContext } from "@/contexts/Auth.tsx";
 import ErrorContext from "@/contexts/Error.tsx";
