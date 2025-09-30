@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ListenerManagementSection } from "@/components/listeners/ListenerManagementSection.tsx";
 import useAgents from "@/hooks/useAgents.ts";
 import useListeners from "@/hooks/useListeners.ts";
+import { useTheme } from "@/hooks/useTheme";
 import type { LigoloAgent } from "@/types/agents.ts";
 import type { Listener } from "@/types/listeners.ts";
 
@@ -39,7 +40,10 @@ const ROW_Y = 240;
 const BOX = { w: 220, h: 140 };
 const COL_X = [160, 560, 960]; // Proxy | meio | direita
 const PIN_OFFSET = 28;
-const TUNNEL_COLOR = "rgba(100,116,139,0.85)"; // slate-500
+const TUNNEL_COLOR_LIGHT = "rgba(100,116,139,0.85)"; // slate-500
+const TUNNEL_COLOR_DARK = "rgba(148,163,184,0.7)"; // slate-400
+const PORT_FILL_LIGHT = "#ffcc29";
+const PORT_FILL_DARK = "#facc15";
 const TUNNEL_WIDTH = 10;
 // distância entre túneis paralelos do mesmo par
 const PARALLEL_GAP = 14;
@@ -120,6 +124,9 @@ export default function Topology() {
     loading: listenersLoading,
     mutate: mutateListeners,
   } = useListeners();
+  const { isDark } = useTheme();
+  const tunnelColor = isDark ? TUNNEL_COLOR_DARK : TUNNEL_COLOR_LIGHT;
+  const portFill = isDark ? PORT_FILL_DARK : PORT_FILL_LIGHT;
   const listenerList = useMemo(
     () => asArray<Partial<Listener>>(listeners),
     [listeners],
@@ -347,8 +354,10 @@ export default function Topology() {
   return (
     <div className="flex flex-col gap-8 py-6 pb-12">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-slate-900">Topologia</h1>
-        <p className="text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+          Topologia
+        </h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
         </p>
       </div>
@@ -363,7 +372,7 @@ export default function Topology() {
       <section className="flex flex-col gap-3">
         <div
           ref={stageRef}
-          className="relative w-full min-h-[460px] rounded-xl border bg-white shadow-sm"
+          className="relative w-full min-h-[460px] rounded-xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-900"
           style={{ minHeight: 900, height: "clamp(420px, 65vh, 720px)" }}
         >
         {/* conexões */}
@@ -376,7 +385,7 @@ export default function Topology() {
               x2={conn.to.x}
               y2={conn.to.y}
               strokeWidth={TUNNEL_WIDTH}
-              stroke={TUNNEL_COLOR}
+              stroke={tunnelColor}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -404,7 +413,7 @@ export default function Topology() {
                   width={W}
                   height={H}
                   rx={R}
-                  fill="#ffcc29"
+                  fill={portFill}
                   opacity="0.85"
                 />
                 <text
@@ -412,7 +421,7 @@ export default function Topology() {
                   y={cy}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  className="fill-slate-800 font-mono text-[11px]"
+                  className="font-mono text-[11px] fill-slate-800 dark:fill-slate-900"
                 >
                   {p.text}
                 </text>
@@ -429,15 +438,20 @@ export default function Topology() {
             className="absolute -translate-x-1/2 -translate-y-1/2 select-none cursor-grab active:cursor-grabbing"
             style={{ left: n.center.x, top: n.center.y, width: BOX.w, height: BOX.h }}
           >
-            <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
               <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-3">
-                <div style={{fontSize:12}} className="text-base font-semibold text-slate-900 text-center">{n.label}</div>
+                <div
+                  style={{ fontSize: 12 }}
+                  className="text-center text-base font-semibold text-slate-900 dark:text-slate-100"
+                >
+                  {n.label}
+                </div>
                 {n.ips.length > 0 && (
                   <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
                     {n.ips.map((ip) => (
                       <span
                         key={ip}
-                        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600"
+                        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
                       >
                         {ip}
                       </span>
@@ -450,7 +464,7 @@ export default function Topology() {
         ))}
         </div>
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Dica: arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam
           automaticamente.
         </p>
