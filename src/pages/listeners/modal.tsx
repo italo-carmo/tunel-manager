@@ -257,6 +257,7 @@ export function ListenerCreationModal({
       isOpen={isOpen}
       placement="top-center"
       onOpenChange={onOpenChange}
+      shouldBlockScroll={false}
       classNames={{ wrapper: "listener-creation-modal-wrapper" }}
     >
       <ModalContent>
