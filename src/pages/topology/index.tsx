@@ -407,13 +407,6 @@ export default function Topology() {
           const offset = index * PIN_STACK_GAP;
           pin.y += side === "top" ? -offset : offset;
         });
-      } else if (side === "left" || side === "right") {
-        group.sort((a, b) => a.y - b.y);
-        group.forEach((pin, index) => {
-          if (index === 0) return;
-          const offset = index * PIN_STACK_GAP;
-          pin.x += side === "left" ? -offset : offset;
-        });
       }
     });
 
