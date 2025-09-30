@@ -23,6 +23,8 @@ type Connection = {
   port: number | null;
   from: Vec2;
   to: Vec2;
+  fromId: string;
+  toId: string;
 };
 
 type PortPin = {
@@ -33,6 +35,8 @@ type PortPin = {
   orientation: "horizontal" | "vertical";
   anchor: "start" | "end" | "center";
   dir: Vec2;
+  nodeId: string;
+  side: "top" | "bottom" | "left" | "right";
 };
 
 // layout base
@@ -48,6 +52,7 @@ const PORT_FILL_DARK = "#facc15";
 const TUNNEL_WIDTH = 8;
 // distância entre túneis paralelos do mesmo par
 const PARALLEL_GAP = 14;
+const PIN_STACK_GAP = 16;
 const POS_STORAGE_KEY = "topology-node-positions";
 
 // helpers -----------------------------------------------------------------
@@ -99,6 +104,7 @@ function createPortPin(
   origin: Vec2,
   target: Vec2,
   text: string,
+  nodeId: string,
 ): PortPin {
   const rawDir = normalizeVec(target.x - origin.x, target.y - origin.y);
   const hasDirection = Math.abs(rawDir.x) > 0.0001 || Math.abs(rawDir.y) > 0.0001;
@@ -114,8 +120,20 @@ function createPortPin(
         ? "start"
         : "end"
       : "center";
+  const side:
+    | "top"
+    | "bottom"
+    | "left"
+    | "right" =
+    orientation === "horizontal"
+      ? dir.x >= 0
+        ? "right"
+        : "left"
+      : dir.y >= 0
+        ? "bottom"
+        : "top";
 
-  return { id, x: pos.x, y: pos.y, text, orientation, anchor, dir };
+  return { id, x: pos.x, y: pos.y, text, orientation, anchor, dir, nodeId, side };
 }
 
 // componente ---------------------------------------------------------------
@@ -274,6 +292,8 @@ export default function Topology() {
       to: Vec2;
       srcId: string;
       dstId: string;
+      fromId: string;
+      toId: string;
     };
 
     const base: BaseConn[] = [];
@@ -308,6 +328,8 @@ export default function Topology() {
         // padroniza a “ordem” para agrupar (par não-direcionado)
         srcId: srcId < dstId ? srcId : dstId,
         dstId: srcId < dstId ? dstId : srcId,
+        fromId: srcId,
+        toId: dstId,
       });
     });
 
@@ -346,6 +368,8 @@ export default function Topology() {
           port: c.port,
           from: shiftedFrom,
           to: shiftedTo,
+          fromId: c.fromId,
+          toId: c.toId,
         });
       });
     }
@@ -358,9 +382,41 @@ export default function Topology() {
     const pins: PortPin[] = [];
     connections.forEach((conn) => {
       if (!conn.port) return;
-      pins.push(createPortPin(`${conn.id}-from`, conn.from, conn.to, String(conn.port)));
-      pins.push(createPortPin(`${conn.id}-to`, conn.to, conn.from, String(conn.port)));
+      pins.push(
+        createPortPin(`${conn.id}-from`, conn.from, conn.to, String(conn.port), conn.fromId),
+      );
+      pins.push(
+        createPortPin(`${conn.id}-to`, conn.to, conn.from, String(conn.port), conn.toId),
+      );
     });
+
+    const grouped = new Map<string, PortPin[]>();
+    pins.forEach((pin) => {
+      const key = `${pin.nodeId}|${pin.side}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(pin);
+    });
+
+    grouped.forEach((group) => {
+      if (group.length <= 1) return;
+      const side = group[0]?.side;
+      if (side === "top" || side === "bottom") {
+        group.sort((a, b) => a.x - b.x);
+        group.forEach((pin, index) => {
+          if (index === 0) return;
+          const offset = index * PIN_STACK_GAP;
+          pin.y += side === "top" ? -offset : offset;
+        });
+      } else if (side === "left" || side === "right") {
+        group.sort((a, b) => a.y - b.y);
+        group.forEach((pin, index) => {
+          if (index === 0) return;
+          const offset = index * PIN_STACK_GAP;
+          pin.x += side === "left" ? -offset : offset;
+        });
+      }
+    });
+
     return pins;
   }, [connections]);
 
