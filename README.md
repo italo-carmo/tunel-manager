@@ -24,15 +24,15 @@
 npm run dev
 ```
 
-Habilite o arquivo ligolo-ng.yaml do Ligolo Proxy:
-
+Habilite o arquivo ligolo-ng.yaml do Ligolo Proxy com esses dados:
+```
 web:
   enabled: true         # liga a API
   enableui: true        # serve a UI
   addr: 127.0.0.1:8080  # onde vai escutar
   corsallowedorigin:
     - http://127.0.0.1:8080
-
+```
 Ao entrar na interface web:
 
 API URL: http://127.0.0.1:8080
