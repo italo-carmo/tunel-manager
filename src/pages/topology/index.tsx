@@ -158,10 +158,11 @@ export default function Topology() {
 
     // Agents
     Object.entries<LigoloAgent>(agents ?? {}).forEach(([agentId, agent]) => {
-      const ips: string[] = [];
+      const ipSet = new Set<string>();
       (agent.Network ?? []).forEach((network) => {
-        ips.push(...uniqueIPv4s(network?.Addresses));
+        uniqueIPv4s(network?.Addresses).forEach((ip) => ipSet.add(ip));
       });
+      const ips = [...ipSet];
       const hasToProxy = listenerList.some((listener) => {
         const { host: src } = parseHostPort(listener?.ListenerAddr);
         const { host: dst } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
@@ -172,7 +173,7 @@ export default function Topology() {
         id: `agent-${agentId}`,
         kind: "agent",
         label: agent.Name || agentId,
-        ips: ips.slice(0, 2),
+        ips,
         center: { x, y: ROW_Y },
       });
     });
@@ -429,18 +430,19 @@ export default function Topology() {
             style={{ left: n.center.x, top: n.center.y, width: BOX.w, height: BOX.h }}
           >
             <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl">
-              <div className="flex h-full flex-col items-center justify-center gap-1 px-4">
-                {/* chips de IPs */}
-                {n.ips[0] && (
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-                    {n.ips[0]}
-                  </span>
-                )}
-                <div className="text-base font-semibold text-slate-900">{n.label}</div>
-                {n.ips[1] && (
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-                    {n.ips[1]}
-                  </span>
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-3">
+                <div className="text-base font-semibold text-slate-900 text-center">{n.label}</div>
+                {n.ips.length > 0 && (
+                  <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
+                    {n.ips.map((ip) => (
+                      <span
+                        key={ip}
+                        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600"
+                      >
+                        {ip}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
