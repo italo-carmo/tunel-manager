@@ -36,16 +36,16 @@ type PortPin = {
 };
 
 // layout base
-const BOX = { w: 220, h: 140 };
+const BOX = { w: 220, h: 150 };
 const ROW_Y = 240;
 const COLUMN_GAP = BOX.h + 80;
 const COL_X = [160, 560, 960]; // Proxy | meio | direita
-const PIN_OFFSET = 28;
+const PIN_OFFSET = 15;
 const TUNNEL_COLOR_LIGHT = "rgba(100,116,139,0.85)"; // slate-500
 const TUNNEL_COLOR_DARK = "rgba(148,163,184,0.7)"; // slate-400
 const PORT_FILL_LIGHT = "#ffcc29";
 const PORT_FILL_DARK = "#facc15";
-const TUNNEL_WIDTH = 10;
+const TUNNEL_WIDTH = 8;
 // distância entre túneis paralelos do mesmo par
 const PARALLEL_GAP = 14;
 const POS_STORAGE_KEY = "topology-node-positions";
@@ -444,8 +444,8 @@ export default function Topology() {
 
           {portPins.map((p) => {
             const W = 40;
-            const H = 20;
-            const R = 8;
+            const H = 12;
+            const R = 5;
             const rectX =
               p.orientation === "horizontal"
                 ? p.anchor === "end"
