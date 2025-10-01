@@ -36,6 +36,8 @@ import type { Listener } from "@/types/listeners.ts";
 
 type Vec2 = { x: number; y: number };
 
+type NodeSize = { w: number; h: number };
+
 type Node = {
   id: string;
   kind: "proxy" | "agent";
@@ -68,9 +70,9 @@ type PortPin = {
 };
 
 // layout base
-const BOX = { w: 220, h: 190 };
+const DEFAULT_NODE_SIZE: NodeSize = { w: 220, h: 190 };
 const ROW_Y = 240;
-const COLUMN_GAP = BOX.h + 80;
+const COLUMN_GAP = DEFAULT_NODE_SIZE.h + 80;
 const COL_X = [160, 560, 960]; // Proxy | meio | direita
 const PIN_OFFSET = 15;
 const TUNNEL_COLOR_LIGHT = "rgba(100,116,139,0.85)"; // slate-500
@@ -117,12 +119,12 @@ function normalizeVec(dx: number, dy: number): Vec2 {
   return { x: dx / length, y: dy / length };
 }
 
-function edgePoint(from: Vec2, toward: Vec2): Vec2 {
+function edgePoint(from: Vec2, toward: Vec2, size: NodeSize): Vec2 {
   const dx = toward.x - from.x;
   const dy = toward.y - from.y;
   if (!dx && !dy) return { ...from };
-  const halfW = BOX.w / 2;
-  const halfH = BOX.h / 2;
+  const halfW = size.w / 2;
+  const halfH = size.h / 2;
   const scale = Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH, 1);
   return { x: from.x + dx / scale, y: from.y + dy / scale };
 }
@@ -208,6 +210,8 @@ export default function Topology() {
     onOpenChange: onInterfaceModalOpenChange,
   } = useDisclosure();
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [nodeSizes, setNodeSizes] = useState<Record<string, NodeSize>>({});
+  const nodeObserverRef = useRef<Map<string, ResizeObserver>>(new Map());
   const tunnelColor = isDark ? TUNNEL_COLOR_DARK : TUNNEL_COLOR_LIGHT;
   const portFill = isDark ? PORT_FILL_DARK : PORT_FILL_LIGHT;
   const listenerList = useMemo(
@@ -326,6 +330,56 @@ export default function Topology() {
   );
   const nodesById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes]);
 
+  const registerNode = useCallback(
+    (id: string, node: HTMLDivElement | null) => {
+      const existing = nodeObserverRef.current.get(id);
+      if (existing) {
+        existing.disconnect();
+        nodeObserverRef.current.delete(id);
+      }
+
+      if (!node) return;
+
+      const updateSize = (width: number, height: number) => {
+        const w = Math.round(width);
+        const h = Math.round(height);
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+        setNodeSizes((prev) => {
+          const prevSize = prev[id];
+          if (prevSize && prevSize.w === w && prevSize.h === h) return prev;
+          return { ...prev, [id]: { w, h } };
+        });
+      };
+
+      const measure = () => {
+        const rect = node.getBoundingClientRect();
+        updateSize(rect.width, rect.height);
+      };
+
+      measure();
+
+      if (typeof ResizeObserver === "undefined") return;
+
+      const observer = new ResizeObserver((entries) => {
+        entries.forEach((entry) => {
+          const { width, height } = entry.contentRect;
+          updateSize(width, height);
+        });
+      });
+
+      observer.observe(node);
+      nodeObserverRef.current.set(id, observer);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      nodeObserverRef.current.forEach((observer) => observer.disconnect());
+      nodeObserverRef.current.clear();
+    };
+  }, []);
+
   // -------------------- CONEXÕES (com linhas paralelas) -------------------
   const connections = useMemo<Connection[]>(() => {
     type BaseConn = {
@@ -360,8 +414,16 @@ export default function Topology() {
       const dstNode = nodesById[dstId];
       if (!srcNode || !dstNode) return;
 
-      const from = edgePoint(srcNode.center, dstNode.center);
-      const to = edgePoint(dstNode.center, srcNode.center);
+      const from = edgePoint(
+        srcNode.center,
+        dstNode.center,
+        nodeSizes[srcId] ?? DEFAULT_NODE_SIZE,
+      );
+      const to = edgePoint(
+        dstNode.center,
+        srcNode.center,
+        nodeSizes[dstId] ?? DEFAULT_NODE_SIZE,
+      );
 
       base.push({
         id: `conn-${index}`,
@@ -418,7 +480,7 @@ export default function Topology() {
     }
 
     return finalConns;
-  }, [listenerList, nodesById, ipToAgent]);
+  }, [listenerList, nodesById, ipToAgent, nodeSizes]);
 
   // --------- pins nas entradas/saídas (colados nas bordas) ---------------
   const portPins = useMemo<PortPin[]>(() => {
@@ -527,8 +589,9 @@ export default function Topology() {
       const local = toLocalPoint(ev.clientX, ev.clientY);
       if (!local) return;
       const { rect } = local;
-      const nextX = clamp(local.x - drag.offset.x, BOX.w / 2, rect.width - BOX.w / 2);
-      const nextY = clamp(local.y - drag.offset.y, BOX.h / 2, rect.height - BOX.h / 2);
+      const size = nodeSizes[drag.id] ?? DEFAULT_NODE_SIZE;
+      const nextX = clamp(local.x - drag.offset.x, size.w / 2, rect.width - size.w / 2);
+      const nextY = clamp(local.y - drag.offset.y, size.h / 2, rect.height - size.h / 2);
       setPos((p) => ({ ...p, [drag.id]: { x: nextX, y: nextY } }));
     }
     function onUp() {
@@ -540,7 +603,7 @@ export default function Topology() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [drag]);
+  }, [drag, nodeSizes]);
 
   function beginDrag(e: React.MouseEvent, n: Node) {
     const local = toLocalPoint(e.clientX, e.clientY);
@@ -648,57 +711,61 @@ export default function Topology() {
         </svg>
 
         {/* nodes */}
-        {nodes.map((n) => (
-          <div
-            key={n.id}
-            onMouseDown={(e) => beginDrag(e, n)}
-            className="absolute -translate-x-1/2 -translate-y-1/2 select-none cursor-grab active:cursor-grabbing"
-            style={{ left: n.center.x, top: n.center.y, width: BOX.w, height: BOX.h }}
-          >
-            <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
-              <div style={{ marginTop: 5, marginLeft: 5 }}>
-                {n.label.includes("root") ? (
-                  <img src={hash} width={30} />
-                ) : (
-                  <img width={30} src={cifrao} />
-                )}
-              </div>
-
-              <div className="flex h-full flex-col gap-3 px-4 py-3">
-                <div className="flex flex-1 flex-col items-center gap-2 text-center">
-                  <div
-                    style={{ fontSize: 12 }}
-                    className="text-base font-semibold text-slate-900 dark:text-slate-100"
-                  >
-                    {n.label}
-                  </div>
-                  {n.ips.length > 0 && (
-                    <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
-                      {n.ips.map((ip) => (
-                        <span
-                          key={ip}
-                          className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
-                        >
-                          {ip}
-                        </span>
-                      ))}
-                    </div>
+        {nodes.map((n) => {
+          const size = nodeSizes[n.id] ?? DEFAULT_NODE_SIZE;
+          return (
+            <div
+              key={n.id}
+              ref={(el) => registerNode(n.id, el)}
+              onMouseDown={(e) => beginDrag(e, n)}
+              className="absolute -translate-x-1/2 -translate-y-1/2 select-none cursor-grab active:cursor-grabbing"
+              style={{ left: n.center.x, top: n.center.y, width: size.w }}
+            >
+              <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
+                <div style={{ marginTop: 5, marginLeft: 5 }}>
+                  {n.label.includes("root") ? (
+                    <img src={hash} width={30} />
+                  ) : (
+                    <img width={30} src={cifrao} />
                   )}
                 </div>
-                {n.kind === "agent" && n.agent && n.agentId && (
-                  <AgentTunnelPanel
-                    agent={n.agent}
-                    agentId={n.agentId}
-                    interfaceNames={interfaceNames}
-                    onStart={handleTunnelStart}
-                    onStop={handleTunnelStop}
-                    onCreateInterface={openInterfaceModalForAgent}
-                  />
-                )}
+
+                <div className="flex h-full flex-col gap-3 px-4 py-3">
+                  <div className="flex flex-1 flex-col items-center gap-2 text-center">
+                    <div
+                      style={{ fontSize: 12 }}
+                      className="text-base font-semibold text-slate-900 dark:text-slate-100"
+                    >
+                      {n.label}
+                    </div>
+                    {n.ips.length > 0 && (
+                      <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
+                        {n.ips.map((ip) => (
+                          <span
+                            key={ip}
+                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
+                          >
+                            {ip}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {n.kind === "agent" && n.agent && n.agentId && (
+                    <AgentTunnelPanel
+                      agent={n.agent}
+                      agentId={n.agentId}
+                      interfaceNames={interfaceNames}
+                      onStart={handleTunnelStart}
+                      onStop={handleTunnelStop}
+                      onCreateInterface={openInterfaceModalForAgent}
+                    />
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         </div>
 
         <p className="text-xs text-slate-500 dark:text-slate-400">
