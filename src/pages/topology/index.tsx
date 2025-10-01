@@ -773,7 +773,7 @@ export default function Topology() {
         <div
           ref={stageRef}
           className="relative w-full min-h-[460px] rounded-xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-900"
-          style={{ minHeight: 900, height: "clamp(420px, 65vh, 720px)" }}
+          style={{ minHeight: 1200, height: "clamp(420px, 65vh, 720px)" }}
         >
         {/* conexões */}
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
