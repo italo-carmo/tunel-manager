@@ -323,7 +323,7 @@ export function ListenerManagementSection({
             <TableColumn className="uppercase">Actions</TableColumn>
           </TableHeader>
           <TableBody
-            emptyContent={"No active listeners."}
+            emptyContent={"Sem listeners ativos."}
             loadingState={loadingState}
             loadingContent={<CircularProgress aria-label="Loading..." size="sm" />}
           >

@@ -160,6 +160,7 @@ export default function IndexPage() {
                           <div className="relative flex items-center gap-2">
                             <Tooltip content="Add new route">
                               <span
+
                                 className="text-lg text-default-400 cursor-pointer active:opacity-50"
                                 onClick={() => {
                                   setSelectedInterface(row);
