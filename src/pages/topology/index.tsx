@@ -825,36 +825,38 @@ function AgentTunnelPanel({
             </Button>
           </Tooltip>
         ) : (
-          <Dropdown>
-            <DropdownTrigger>
-              <Tooltip content="Iniciar o tunelamento" color="primary">
-                <Button
-                  size="sm"
-                  color="primary"
-                  variant="flat"
-                  startContent={<Power size={16} />}
+          <Tooltip content="Iniciar o tunelamento" color="primary">
+            <div className="inline-flex">
+              <Dropdown>
+                <DropdownTrigger>
+                  <Button
+                    size="sm"
+                    color="primary"
+                    variant="flat"
+                    startContent={<Power size={16} />}
+                  >
+                    Tunelar
+                  </Button>
+                </DropdownTrigger>
+                <DropdownMenu
+                  aria-label="Opções de tunelamento"
+                  items={dropdownItems}
+                  onAction={handleDropdownAction}
                 >
-                  Tunelar
-                </Button>
-              </Tooltip>
-            </DropdownTrigger>
-            <DropdownMenu
-              aria-label="Opções de tunelamento"
-              items={dropdownItems}
-              onAction={handleDropdownAction}
-            >
-              {(item) => (
-                <DropdownItem
-                  key={item.key}
-                  startContent={item.icon}
-                  description={item.description}
-                  isDisabled={item.disabled}
-                >
-                  {item.label}
-                </DropdownItem>
-              )}
-            </DropdownMenu>
-          </Dropdown>
+                  {(item) => (
+                    <DropdownItem
+                      key={item.key}
+                      startContent={item.icon}
+                      description={item.description}
+                      isDisabled={item.disabled}
+                    >
+                      {item.label}
+                    </DropdownItem>
+                  )}
+                </DropdownMenu>
+              </Dropdown>
+            </div>
+          </Tooltip>
         )}
       </div>
 
