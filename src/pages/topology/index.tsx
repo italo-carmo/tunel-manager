@@ -16,6 +16,11 @@ import {
   DropdownItem,
   DropdownMenu,
   DropdownTrigger,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
   Tooltip,
   useDisclosure,
 } from "@heroui/react";
@@ -32,6 +37,7 @@ import { useApi } from "@/hooks/useApi.ts";
 import { handleApiResponse } from "@/hooks/toast.ts";
 import { InterfaceCreationModal } from "@/pages/interfaces/modal.tsx";
 import type { LigoloAgent } from "@/types/agents.ts";
+import type { LigoloInterfaces } from "@/types/interfaces.ts";
 import type { Listener } from "@/types/listeners.ts";
 
 type Vec2 = { x: number; y: number };
@@ -166,6 +172,71 @@ function createPortPin(
   return { id, x: pos.x, y: pos.y, text, orientation, anchor, dir, nodeId, side };
 }
 
+function ipv4ToInt(ip: string): number | null {
+  const octets = ip.split(".").map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return null;
+  }
+  return (
+    ((octets[0] << 24) >>> 0) +
+    ((octets[1] << 16) >>> 0) +
+    ((octets[2] << 8) >>> 0) +
+    (octets[3] >>> 0)
+  ) >>> 0;
+}
+
+function intToIPv4(value: number): string {
+  const v = value >>> 0;
+  return [
+    (v >>> 24) & 0xff,
+    (v >>> 16) & 0xff,
+    (v >>> 8) & 0xff,
+    v & 0xff,
+  ].join(".");
+}
+
+function toNetwork(address?: string | null): string | null {
+  if (!address) return null;
+  const [ip, prefixStr] = String(address).split("/");
+  if (!prefixStr) return null;
+  const prefix = Number(prefixStr);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  const ipValue = ipv4ToInt(ip.trim());
+  if (ipValue === null) return null;
+  const mask = prefix === 0 ? 0 : ((0xffffffff << (32 - prefix)) >>> 0);
+  const networkValue = ipValue & mask;
+  return `${intToIPv4(networkValue)}/${prefix}`;
+}
+
+type AgentRouteOption = {
+  value: string;
+  interfaceName: string;
+  address: string;
+};
+
+function buildAgentRouteOptions(agent?: LigoloAgent | null): AgentRouteOption[] {
+  if (!agent) return [];
+
+  const options: AgentRouteOption[] = [];
+  const seen = new Set<string>();
+
+  (agent.Network ?? []).forEach((network) => {
+    const ifaceName = network?.Name || `Interface ${network?.Index ?? ""}`.trim();
+    (network?.Addresses ?? []).forEach((addr) => {
+      const networkAddr = toNetwork(addr);
+      if (!networkAddr || seen.has(networkAddr)) return;
+      seen.add(networkAddr);
+      options.push({
+        value: networkAddr,
+        interfaceName: ifaceName || networkAddr,
+        address: String(addr ?? networkAddr),
+      });
+    });
+  });
+
+  return options;
+}
+
 // componente ---------------------------------------------------------------
 function loadStoredPositions(): Record<string, Vec2> {
   if (typeof window === "undefined") return {};
@@ -210,6 +281,12 @@ export default function Topology() {
     onOpenChange: onInterfaceModalOpenChange,
   } = useDisclosure();
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const {
+    isOpen: isRouteModalOpen,
+    onOpen: onRouteModalOpen,
+    onClose: onRouteModalClose,
+  } = useDisclosure();
+  const [routeAgentId, setRouteAgentId] = useState<string | null>(null);
   const [nodeSizes, setNodeSizes] = useState<Record<string, NodeSize>>({});
   const nodeObserverRef = useRef<Map<string, ResizeObserver>>(new Map());
   const tunnelColor = isDark ? TUNNEL_COLOR_DARK : TUNNEL_COLOR_LIGHT;
@@ -218,6 +295,11 @@ export default function Topology() {
     () => asArray<Partial<Listener>>(listeners),
     [listeners],
   );
+  const selectedRouteAgent = useMemo<LigoloAgent | null>(() => {
+    if (!routeAgentId || !agents) return null;
+    const map = agents as unknown as Record<string, LigoloAgent>;
+    return map[routeAgentId] ?? null;
+  }, [agents, routeAgentId]);
 
   // ip -> agentId
   const ipToAgent = useMemo(() => {
@@ -573,6 +655,36 @@ export default function Topology() {
     ],
   );
 
+  const openRouteModalForAgent = useCallback(
+    (agentId: string) => {
+      setRouteAgentId(agentId);
+      onRouteModalOpen();
+    },
+    [onRouteModalOpen],
+  );
+
+  const closeRouteModal = useCallback(() => {
+    setRouteAgentId(null);
+    onRouteModalClose();
+  }, [onRouteModalClose]);
+
+  const handleRouteCreate = useCallback(
+    async (interfaceName: string, routeValue: string) => {
+      try {
+        const data = await post("api/v1/routes", {
+          interface: interfaceName,
+          route: [routeValue],
+        });
+        handleApiResponse(data as Parameters<typeof handleApiResponse>[0]);
+        if (mutateInterfaces) await mutateInterfaces();
+      } catch (error) {
+        setError(error);
+        throw error;
+      }
+    },
+    [mutateInterfaces, post, setError],
+  );
+
   // drag-n-drop ------------------------------------------------------------
   const stageRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: string; offset: Vec2 } | null>(null);
@@ -618,6 +730,14 @@ export default function Topology() {
         isOpen={isInterfaceModalOpen}
         onOpenChange={onInterfaceCreated}
         mutate={mutateInterfaces}
+      />
+      <AgentRouteModal
+        isOpen={isRouteModalOpen}
+        onClose={closeRouteModal}
+        agent={selectedRouteAgent}
+        agentId={routeAgentId}
+        interfaces={interfaces}
+        onCreateRoute={handleRouteCreate}
       />
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="flex flex-col gap-2">
@@ -759,6 +879,7 @@ export default function Topology() {
                       onStart={handleTunnelStart}
                       onStop={handleTunnelStop}
                       onCreateInterface={openInterfaceModalForAgent}
+                      onAddRoute={openRouteModalForAgent}
                     />
                   )}
                 </div>
@@ -784,6 +905,7 @@ type AgentTunnelPanelProps = {
   onStart: (agentId: string, iface: string) => Promise<void>;
   onStop: (agentId: string) => Promise<void>;
   onCreateInterface: (agentId: string) => void;
+  onAddRoute: (agentId: string) => void;
 };
 
 type TunnelDropdownOption = {
@@ -803,6 +925,7 @@ function AgentTunnelPanel({
   onStart,
   onStop,
   onCreateInterface,
+  onAddRoute,
 }: AgentTunnelPanelProps) {
   const running = agent.Running;
   const interfaceLabel = agent.Interface || "Sem interface ativa";
@@ -933,6 +1056,231 @@ function AgentTunnelPanel({
         </span>
         <span className="truncate">{interfaceLabel}</span>
       </div>
+      <div className="flex justify-end">
+        <Tooltip content="Adicionar rotas com base nas redes do agente" color="primary">
+          <Button
+            size="sm"
+            color="primary"
+            variant="light"
+            startContent={<PlusIcon size={16} />}
+            onPress={() => onAddRoute(agentId)}
+          >
+            Adicionar rota
+          </Button>
+        </Tooltip>
+      </div>
     </div>
+  );
+}
+
+type AgentRouteModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  agent: LigoloAgent | null;
+  agentId: string | null;
+  interfaces?: LigoloInterfaces | null;
+  onCreateRoute: (interfaceName: string, route: string) => Promise<void>;
+};
+
+function AgentRouteModal({
+  isOpen,
+  onClose,
+  agent,
+  agentId,
+  interfaces,
+  onCreateRoute,
+}: AgentRouteModalProps) {
+  const [selectedInterface, setSelectedInterface] = useState<string | null>(null);
+  const [pendingRoute, setPendingRoute] = useState<string | null>(null);
+
+  const agentRoutes = useMemo(() => buildAgentRouteOptions(agent), [agent]);
+  const interfaceEntries = useMemo(
+    () => Object.entries(interfaces ?? {}),
+    [interfaces],
+  );
+  const selectedInterfaceData = useMemo(
+    () => (selectedInterface && interfaces ? interfaces[selectedInterface] : undefined),
+    [interfaces, selectedInterface],
+  );
+  const existingRoutes = useMemo(() => {
+    const routes = selectedInterfaceData?.Routes ?? [];
+    return new Set(routes.map((route) => route.Destination));
+  }, [selectedInterfaceData]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSelectedInterface(null);
+      setPendingRoute(null);
+    }
+  }, [isOpen, agentId]);
+
+  useEffect(() => {
+    if (selectedInterface && !(interfaces && interfaces[selectedInterface])) {
+      setSelectedInterface(null);
+    }
+  }, [interfaces, selectedInterface]);
+
+  const handleRouteSelection = useCallback(
+    async (routeValue: string) => {
+      if (!selectedInterface) return;
+      setPendingRoute(routeValue);
+      try {
+        await onCreateRoute(selectedInterface, routeValue);
+      } catch (error) {
+        // Erros são tratados globalmente pelo ErrorContext
+      } finally {
+        setPendingRoute(null);
+      }
+    },
+    [onCreateRoute, selectedInterface],
+  );
+
+  const agentLabel = agent?.Name || agentId || "Agente";
+  const hasInterfaces = interfaceEntries.length > 0;
+  const hasAgentRoutes = agentRoutes.length > 0;
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      size="lg"
+      placement="top-center"
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <ModalContent>
+        {(modalClose) => (
+          <>
+            <ModalHeader className="flex flex-col gap-1">
+              <span className="text-base font-semibold">Rotas do agente</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">{agentLabel}</span>
+            </ModalHeader>
+            <ModalBody className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  Interfaces Ligolo
+                </span>
+                {hasInterfaces ? (
+                  <div className="flex max-h-60 flex-col gap-2 overflow-y-auto pr-1">
+                    {interfaceEntries.map(([name, iface]) => {
+                      const isSelected = selectedInterface === name;
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => setSelectedInterface(name)}
+                          className={`flex flex-col gap-2 rounded-lg border px-3 py-2 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 dark:border-slate-700 ${
+                            isSelected
+                              ? "border-primary bg-primary/10 dark:bg-primary/20"
+                              : "border-slate-200 bg-white hover:border-primary/60 hover:bg-primary/5 dark:bg-slate-800"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                              {name}
+                            </span>
+                            {isSelected ? (
+                              <Chip color="primary" size="sm" variant="flat">
+                                Selecionada
+                              </Chip>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {iface?.Routes && iface.Routes.length > 0 ? (
+                              iface.Routes.map((route, idx) => (
+                                <Chip
+                                  key={`${route.Destination}-${idx}`}
+                                  color={route.Active ? "success" : "warning"}
+                                  size="sm"
+                                  variant="flat"
+                                >
+                                  {route.Destination}
+                                </Chip>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Nenhuma rota cadastrada
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
+                    Nenhuma interface Ligolo encontrada. Crie uma interface para adicionar rotas.
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                  Rotas disponíveis do agente
+                </span>
+                {hasAgentRoutes ? (
+                  selectedInterface ? (
+                    <div className="flex flex-wrap gap-2">
+                      {agentRoutes.map((route) => {
+                        const alreadyAdded = existingRoutes.has(route.value);
+                        const disabled = alreadyAdded || (pendingRoute !== null && pendingRoute !== route.value);
+                        return (
+                          <Tooltip
+                            key={route.value}
+                            content={
+                              alreadyAdded
+                                ? "Rota já adicionada"
+                                : `Detectada em ${route.address}`
+                            }
+                            color={alreadyAdded ? "success" : "default"}
+                          >
+                            <Button
+                              size="sm"
+                              color={alreadyAdded ? "success" : "primary"}
+                              variant={alreadyAdded ? "flat" : "bordered"}
+                              isDisabled={disabled}
+                              isLoading={pendingRoute === route.value}
+                              onPress={() => handleRouteSelection(route.value)}
+                            >
+                              <div className="flex flex-col leading-tight">
+                                <span className="text-xs font-medium text-slate-700 dark:text-slate-100">
+                                  {route.value}
+                                </span>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-300">
+                                  {route.interfaceName}
+                                </span>
+                              </div>
+                            </Button>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-slate-500 dark:text-slate-400">
+                      Selecione uma interface Ligolo para habilitar as rotas sugeridas.
+                    </span>
+                  )
+                ) : (
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
+                    Nenhuma rede foi identificada para este agente.
+                  </span>
+                )}
+              </div>
+            </ModalBody>
+            <ModalFooter>
+              <Button
+                color="danger"
+                variant="flat"
+                onPress={() => {
+                  modalClose();
+                }}
+              >
+                Fechar
+              </Button>
+            </ModalFooter>
+          </>
+        )}
+      </ModalContent>
+    </Modal>
   );
 }
