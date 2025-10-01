@@ -1,11 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Key,
+  type ReactNode,
+} from "react";
+import {
+  Button,
+  Chip,
+  Dropdown,
+  DropdownItem,
+  DropdownMenu,
+  DropdownTrigger,
+  Tooltip,
+  useDisclosure,
+} from "@heroui/react";
+import { ChevronsLeftRightEllipsis, NetworkIcon, PlusIcon, Power, PowerOff } from "lucide-react";
 import cifrao from "../../../public/cifrao.png";
 import hash from "../../../public/hash.png";
 import { ListenerManagementSection } from "@/components/listeners/ListenerManagementSection.tsx";
 import useAgents from "@/hooks/useAgents.ts";
+import useInterfaces from "@/hooks/useInterfaces.ts";
 import useListeners from "@/hooks/useListeners.ts";
 import { useTheme } from "@/hooks/useTheme";
+import ErrorContext from "@/contexts/Error.tsx";
+import { useApi } from "@/hooks/useApi.ts";
+import { handleApiResponse } from "@/hooks/toast.ts";
+import { InterfaceCreationModal } from "@/pages/interfaces/modal.tsx";
 import type { LigoloAgent } from "@/types/agents.ts";
 import type { Listener } from "@/types/listeners.ts";
 
@@ -17,6 +42,8 @@ type Node = {
   label: string;
   ips: string[];
   center: Vec2;
+  agentId?: string;
+  agent?: LigoloAgent;
 };
 
 type Connection = {
@@ -161,13 +188,26 @@ function loadStoredPositions(): Record<string, Vec2> {
 }
 
 export default function Topology() {
-  const { agents } = useAgents();
+  const { agents, mutate: mutateAgents } = useAgents();
   const {
     listeners,
     loading: listenersLoading,
     mutate: mutateListeners,
   } = useListeners();
+  const { interfaces, mutate: mutateInterfaces } = useInterfaces();
+  const interfaceNames = useMemo(
+    () => (interfaces ? Object.keys(interfaces) : []),
+    [interfaces],
+  );
   const { isDark } = useTheme();
+  const { setError } = useContext(ErrorContext);
+  const { post, del } = useApi();
+  const {
+    isOpen: isInterfaceModalOpen,
+    onOpen: onInterfaceModalOpen,
+    onOpenChange: onInterfaceModalOpenChange,
+  } = useDisclosure();
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const tunnelColor = isDark ? TUNNEL_COLOR_DARK : TUNNEL_COLOR_LIGHT;
   const portFill = isDark ? PORT_FILL_DARK : PORT_FILL_LIGHT;
   const listenerList = useMemo(
@@ -231,6 +271,8 @@ export default function Topology() {
         kind: "agent",
         label: agent.Name || agentId,
         ips,
+        agentId,
+        agent,
       });
     });
 
@@ -414,6 +456,61 @@ export default function Topology() {
     return pins;
   }, [connections]);
 
+  const handleTunnelStop = useCallback(
+    async (id: string) => {
+      try {
+        const data = await del(`api/v1/tunnel/${id}`);
+        handleApiResponse(data as Parameters<typeof handleApiResponse>[0]);
+        if (mutateAgents) await mutateAgents();
+      } catch (error) {
+        setError(error);
+      }
+    },
+    [del, mutateAgents, setError],
+  );
+
+  const handleTunnelStart = useCallback(
+    async (id: string, iface: string) => {
+      try {
+        const data = await post(`api/v1/tunnel/${id}`, { interface: iface });
+        handleApiResponse(data as Parameters<typeof handleApiResponse>[0]);
+        if (mutateAgents) await mutateAgents();
+      } catch (error) {
+        setError(error);
+      }
+    },
+    [post, mutateAgents, setError],
+  );
+
+  const openInterfaceModalForAgent = useCallback(
+    (agentId?: string | null) => {
+      setSelectedAgent(agentId ?? null);
+      onInterfaceModalOpen();
+    },
+    [onInterfaceModalOpen],
+  );
+
+  const onInterfaceCreated = useCallback(
+    async (interfaceName?: string) => {
+      onInterfaceModalOpenChange();
+
+      if (interfaceName && selectedAgent) {
+        await handleTunnelStart(selectedAgent, interfaceName);
+      }
+
+      if (mutateAgents) await mutateAgents();
+      if (mutateInterfaces) await mutateInterfaces();
+      setSelectedAgent(null);
+    },
+    [
+      handleTunnelStart,
+      mutateAgents,
+      mutateInterfaces,
+      onInterfaceModalOpenChange,
+      selectedAgent,
+    ],
+  );
+
   // drag-n-drop ------------------------------------------------------------
   const stageRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: string; offset: Vec2 } | null>(null);
@@ -454,13 +551,32 @@ export default function Topology() {
   // UI --------------------------------------------------------------------
   return (
     <div className="flex flex-col gap-8 py-6 pb-12">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          Topologia
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
-        </p>
+      <InterfaceCreationModal
+        isOpen={isInterfaceModalOpen}
+        onOpenChange={onInterfaceCreated}
+        mutate={mutateInterfaces}
+      />
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+            Topologia
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Tooltip content="Criar uma nova interface Ligolo">
+            <Button
+              color="primary"
+              endContent={<PlusIcon size={16} />}
+              variant="flat"
+              onPress={() => openInterfaceModalForAgent(null)}
+            >
+              Nova interface
+            </Button>
+          </Tooltip>
+        </div>
       </div>
 
       <ListenerManagementSection
@@ -540,29 +656,44 @@ export default function Topology() {
             style={{ left: n.center.x, top: n.center.y, width: BOX.w, height: BOX.h }}
           >
             <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
-              <div style={{marginTop:5, marginLeft:5}}>         
-                {n.label.includes('root') ? <img src={hash} width={30} /> : <img  width={30}  src={cifrao} />} 
+              <div style={{ marginTop: 5, marginLeft: 5 }}>
+                {n.label.includes("root") ? (
+                  <img src={hash} width={30} />
+                ) : (
+                  <img width={30} src={cifrao} />
+                )}
               </div>
 
-              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 py-3">
-                <div
-                  style={{ fontSize: 12 }}
-                  className="text-center text-base font-semibold text-slate-900 dark:text-slate-100"
-                >
-       
-                {n.label}
-                </div>
-                {n.ips.length > 0 && (
-                  <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
-                    {n.ips.map((ip) => (
-                      <span
-                        key={ip}
-                        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
-                      >
-                        {ip}
-                      </span>
-                    ))}
+              <div className="flex h-full flex-col gap-3 px-4 py-3">
+                <div className="flex flex-1 flex-col items-center gap-2 text-center">
+                  <div
+                    style={{ fontSize: 12 }}
+                    className="text-base font-semibold text-slate-900 dark:text-slate-100"
+                  >
+                    {n.label}
                   </div>
+                  {n.ips.length > 0 && (
+                    <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
+                      {n.ips.map((ip) => (
+                        <span
+                          key={ip}
+                          className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
+                        >
+                          {ip}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {n.kind === "agent" && n.agent && n.agentId && (
+                  <AgentTunnelPanel
+                    agent={n.agent}
+                    agentId={n.agentId}
+                    interfaceNames={interfaceNames}
+                    onStart={handleTunnelStart}
+                    onStop={handleTunnelStop}
+                    onCreateInterface={openInterfaceModalForAgent}
+                  />
                 )}
               </div>
             </div>
@@ -575,6 +706,164 @@ export default function Topology() {
           automaticamente.
         </p>
       </section>
+    </div>
+  );
+}
+
+type AgentTunnelPanelProps = {
+  agent: LigoloAgent;
+  agentId: string;
+  interfaceNames: string[];
+  onStart: (agentId: string, iface: string) => Promise<void>;
+  onStop: (agentId: string) => Promise<void>;
+  onCreateInterface: (agentId: string) => void;
+};
+
+type TunnelDropdownOption = {
+  key: string;
+  label: string;
+  description?: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  action: "new" | "existing" | "info";
+  iface?: string;
+};
+
+function AgentTunnelPanel({
+  agent,
+  agentId,
+  interfaceNames,
+  onStart,
+  onStop,
+  onCreateInterface,
+}: AgentTunnelPanelProps) {
+  const running = agent.Running;
+  const interfaceLabel = agent.Interface || "Sem interface ativa";
+  const dropdownItems = useMemo<TunnelDropdownOption[]>(() => {
+    const base: TunnelDropdownOption[] = [
+      {
+        key: "new",
+        label: "Nova interface",
+        description: "Criar uma nova interface e iniciar o túnel",
+        icon: (
+          <NetworkIcon className="text-lg text-default-500 pointer-events-none flex-shrink-0" />
+        ),
+        action: "new",
+      },
+    ];
+
+    if (interfaceNames.length) {
+      interfaceNames.forEach((name) => {
+        base.push({
+          key: `existing-${name}`,
+          label: name,
+          description: "Utilizar interface existente",
+          icon: (
+            <ChevronsLeftRightEllipsis className="text-lg text-default-500 pointer-events-none flex-shrink-0" />
+          ),
+          action: "existing",
+          iface: name,
+        });
+      });
+    } else {
+      base.push({
+        key: "empty",
+        label: "Nenhuma interface disponível",
+        icon: (
+          <ChevronsLeftRightEllipsis className="text-lg text-default-300 pointer-events-none flex-shrink-0" />
+        ),
+        action: "info",
+        disabled: true,
+      });
+    }
+
+    return base;
+  }, [interfaceNames]);
+
+  const handleDropdownAction = useCallback(
+    (key: Key) => {
+      const keyStr = String(key);
+      const option = dropdownItems.find((item) => item.key === keyStr);
+      if (!option || option.disabled) return;
+
+      if (option.action === "new") {
+        onCreateInterface(agentId);
+        return;
+      }
+
+      if (option.action === "existing" && option.iface) {
+        void onStart(agentId, option.iface);
+      }
+    },
+    [agentId, dropdownItems, onCreateInterface, onStart],
+  );
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-left text-xs shadow-inner dark:border-slate-700/60 dark:bg-slate-800/70">
+      <div className="flex items-center justify-between gap-2">
+        <Chip
+          size="sm"
+          color={running ? "success" : "default"}
+          variant="flat"
+          className="capitalize"
+        >
+          {running ? "Tunelado" : "Parado"}
+        </Chip>
+
+        {running ? (
+          <Tooltip content="Encerrar o tunelamento" color="danger">
+            <Button
+              size="sm"
+              color="danger"
+              variant="flat"
+              startContent={<PowerOff size={16} />}
+              onPress={async () => {
+                await onStop(agentId);
+              }}
+            >
+              Parar
+            </Button>
+          </Tooltip>
+        ) : (
+          <Dropdown>
+            <DropdownTrigger>
+              <Tooltip content="Iniciar o tunelamento" color="primary">
+                <Button
+                  size="sm"
+                  color="primary"
+                  variant="flat"
+                  startContent={<Power size={16} />}
+                >
+                  Tunelar
+                </Button>
+              </Tooltip>
+            </DropdownTrigger>
+            <DropdownMenu
+              aria-label="Opções de tunelamento"
+              items={dropdownItems}
+              onAction={handleDropdownAction}
+            >
+              {(item) => (
+                <DropdownItem
+                  key={item.key}
+                  startContent={item.icon}
+                  description={item.description}
+                  isDisabled={item.disabled}
+                >
+                  {item.label}
+                </DropdownItem>
+              )}
+            </DropdownMenu>
+          </Dropdown>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+        <span className="font-medium text-slate-700 dark:text-slate-200">
+          Interface atual
+        </span>
+        <span className="truncate">{interfaceLabel}</span>
+      </div>
     </div>
   );
 }
