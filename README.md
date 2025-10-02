@@ -27,11 +27,30 @@ npm run dev
 Habilite o arquivo ligolo-ng.yaml do Ligolo Proxy com esses dados:
 ```
 web:
-  enabled: true         # liga a API
-  enableui: true        # serve a UI
-  addr: 127.0.0.1:8080  # onde vai escutar
-  corsallowedorigin:
-    - http://127.0.0.1:8080
+    behindreverseproxy: false
+    corsallowedorigin:
+        - http://127.0.0.1:8080
+        - http://127.0.0.1:5173
+        - http://localhost:5173
+    debug: true
+    enabled: true
+    enableui: true
+    listen: 127.0.0.1:8080
+    logfile: ui.log
+    secret: 8c77c652304654bc4be3c78ce8a76b9df99d185d978055f4fa2421e05e8ad164
+    tls:
+        alloweddomains: []
+        autocert: false
+        certfile: ""
+        enabled: false
+        keyfile: ""
+        selfcert: false
+        selfcertdomain: ligolo
+    trustedproxies:
+        - 127.0.0.1
+    users:
+        ligolo: $argon2id$v=19$m=32768,t=3,p=4$H/V+uCAZhdP9srEdvWtk7w$0qo3fCMUVWLdRnupiYd+uYZRTmvSFqI19tDN+FI7Mzc
+
 ```
 Ao entrar na interface web:
 ```
