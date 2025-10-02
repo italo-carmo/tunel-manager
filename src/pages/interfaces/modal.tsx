@@ -14,6 +14,7 @@ import { generateSlug } from "random-word-slugs";
 import { useApi } from "@/hooks/useApi.ts";
 import ErrorContext from "@/contexts/Error.tsx";
 import { interfaceRouteSchema, interfaceSchema } from "@/schemas/interfaces.ts";
+import type { LigoloInterfaces } from "@/types/interfaces.ts";
 
 interface RouteCreationProps {
   isOpen?: boolean;
@@ -99,12 +100,14 @@ interface InterfaceCreationProps {
   isOpen?: boolean;
   onOpenChange?: (interfaceName: string) => void;
   mutate?: () => Promise<unknown>;
+  interfaces?: LigoloInterfaces | null;
 }
 
 export function InterfaceCreationModal({
   isOpen,
   onOpenChange,
   mutate,
+  interfaces,
 }: InterfaceCreationProps) {
   const { post } = useApi();
 
@@ -150,7 +153,7 @@ export function InterfaceCreationModal({
               Interface creation
             </ModalHeader>
             <Form validationErrors={formErrors}>
-              <ModalBody className={"w-full"}>
+              <ModalBody className={"w-full flex flex-col gap-4"}>
                 <div className={"flex py-2 px-1 justify-between gap-2 w-full"}>
                   <Input
                     endContent={
@@ -175,6 +178,34 @@ export function InterfaceCreationModal({
                     <DicesIcon />
                   </Button>
                 </div>
+                {interfaces && Object.keys(interfaces).length ? (
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-medium uppercase text-slate-500 dark:text-slate-400">
+                      Interfaces existentes
+                    </span>
+                    <div className="flex max-h-48 flex-wrap gap-2 overflow-y-auto pr-1">
+                      {Object.entries(interfaces).map(([name, value]) => (
+                        <div
+                          key={name}
+                          className="flex min-w-[120px] flex-1 flex-col gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        >
+                          <span className="truncate font-medium text-slate-700 dark:text-slate-100">
+                            {name}
+                          </span>
+                          {value?.Routes && value.Routes.length ? (
+                            <span className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                              {value.Routes.length} rota{value.Routes.length > 1 ? "s" : ""}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                              Sem rotas
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </ModalBody>
             </Form>
             <ModalFooter>

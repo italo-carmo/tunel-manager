@@ -70,6 +70,7 @@ export default function IndexPage() {
         isOpen={isInterfaceOpen}
         onOpenChange={onInterfaceOpenChange}
         mutate={mutate}
+        interfaces={interfaces ?? null}
       ></InterfaceCreationModal>
       <RouteCreationModal
         isOpen={isOpen}
