@@ -267,6 +267,7 @@ export default function Topology() {
     loading: listenersLoading,
     mutate: mutateListeners,
   } = useListeners();
+  const listenerModalOpenerRef = useRef<((agentId?: number) => void) | null>(null);
   const { interfaces, mutate: mutateInterfaces } = useInterfaces();
   const interfaceNames = useMemo(
     () => (interfaces ? Object.keys(interfaces) : []),
@@ -634,6 +635,20 @@ export default function Topology() {
     [onInterfaceModalOpen],
   );
 
+  const openListenerModalForAgent = useCallback((agentId?: string | null) => {
+    const parsed = agentId != null ? Number(agentId) : undefined;
+    const numericAgentId = typeof parsed === "number" && Number.isFinite(parsed)
+      ? parsed
+      : undefined;
+    listenerModalOpenerRef.current?.(numericAgentId);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      listenerModalOpenerRef.current = null;
+    };
+  }, []);
+
   const onInterfaceCreated = useCallback(
     async (interfaceName?: string) => {
       onInterfaceModalOpenChange();
@@ -748,18 +763,6 @@ export default function Topology() {
             Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Tooltip content="Criar uma nova interface Ligolo">
-            <Button
-              color="primary"
-              endContent={<PlusIcon size={16} />}
-              variant="flat"
-              onPress={() => openInterfaceModalForAgent(null)}
-            >
-              Nova interface
-            </Button>
-          </Tooltip>
-        </div>
       </div>
 
       <ListenerManagementSection
@@ -767,7 +770,34 @@ export default function Topology() {
         loading={listenersLoading}
         mutate={mutateListeners}
         className="gap-6"
+        showCreationButton={false}
+        onRegisterCreateListener={(open) => {
+          listenerModalOpenerRef.current = open;
+        }}
       />
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Tooltip content="Criar uma nova interface Ligolo">
+          <Button
+            color="primary"
+            endContent={<PlusIcon size={16} />}
+            variant="flat"
+            onPress={() => openInterfaceModalForAgent(null)}
+          >
+            Nova Interface
+          </Button>
+        </Tooltip>
+        <Tooltip content="Criar um novo listener">
+          <Button
+            color="primary"
+            endContent={<PlusIcon size={16} />}
+            variant="flat"
+            onPress={() => openListenerModalForAgent(null)}
+          >
+            Novo Listener
+          </Button>
+        </Tooltip>
+      </div>
 
       <section className="flex flex-col gap-3">
         <div
@@ -880,6 +910,7 @@ export default function Topology() {
                       onStop={handleTunnelStop}
                       onCreateInterface={openInterfaceModalForAgent}
                       onAddRoute={openRouteModalForAgent}
+                      onCreateListener={(agentId) => openListenerModalForAgent(agentId)}
                     />
                   )}
                 </div>
@@ -906,6 +937,7 @@ type AgentTunnelPanelProps = {
   onStop: (agentId: string) => Promise<void>;
   onCreateInterface: (agentId: string) => void;
   onAddRoute: (agentId: string) => void;
+  onCreateListener: (agentId: string) => void;
 };
 
 type TunnelDropdownOption = {
@@ -926,6 +958,7 @@ function AgentTunnelPanel({
   onStop,
   onCreateInterface,
   onAddRoute,
+  onCreateListener,
 }: AgentTunnelPanelProps) {
   const running = agent.Running;
   const interfaceLabel = agent.Interface || "Sem interface ativa";
@@ -1056,7 +1089,17 @@ function AgentTunnelPanel({
         </span>
         <span className="truncate">{interfaceLabel}</span>
       </div>
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-between gap-2">
+        <Tooltip content="Criar um listener para este agente" color="primary">
+          <Button
+            size="sm"
+            color="primary"
+            variant="light"
+            onPress={() => onCreateListener(agentId)}
+          >
+            + Listener
+          </Button>
+        </Tooltip>
         <Tooltip content="Adicionar rotas com base nas redes do agente" color="primary">
           <Button
             size="sm"
