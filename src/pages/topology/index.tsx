@@ -745,6 +745,7 @@ export default function Topology() {
         isOpen={isInterfaceModalOpen}
         onOpenChange={onInterfaceCreated}
         mutate={mutateInterfaces}
+        interfaces={interfaces ?? null}
       />
       <AgentRouteModal
         isOpen={isRouteModalOpen}
@@ -1105,10 +1106,9 @@ function AgentTunnelPanel({
             size="sm"
             color="primary"
             variant="light"
-            startContent={<PlusIcon size={16} />}
             onPress={() => onAddRoute(agentId)}
           >
-            Adicionar rota
+            + Rota
           </Button>
         </Tooltip>
       </div>
