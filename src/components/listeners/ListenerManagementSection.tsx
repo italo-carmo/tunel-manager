@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   CircularProgress,
@@ -28,6 +28,9 @@ interface ListenerManagementSectionProps {
   mutate?: KeyedMutator<LigoloListeners>;
   className?: string;
   title?: string;
+  onRegisterCreateListener?: (open: (agentId?: number) => void) => void;
+  showCreationButton?: boolean;
+  creationButtonLabel?: string;
 }
 
 type SortOption =
@@ -57,9 +60,33 @@ export function ListenerManagementSection({
   mutate,
   className,
   title = "Listeners",
+  onRegisterCreateListener,
+  showCreationButton = true,
+  creationButtonLabel = "Add New",
 }: ListenerManagementSectionProps) {
   const { del } = useApi();
   const { onOpenChange, onOpen, isOpen } = useDisclosure();
+  const [modalAgentId, setModalAgentId] = useState<number | undefined>();
+
+  const openCreationModal = useCallback(
+    (agentId?: number) => {
+      setModalAgentId(agentId);
+      onOpen();
+    },
+    [onOpen],
+  );
+
+  useEffect(() => {
+    if (onRegisterCreateListener) {
+      onRegisterCreateListener(openCreationModal);
+    }
+  }, [onRegisterCreateListener, openCreationModal]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setModalAgentId(undefined);
+    }
+  }, [isOpen]);
 
   const [selectedAgent, setSelectedAgent] = useState<string>("all");
   const [portFilter, setPortFilter] = useState<string>("");
@@ -246,14 +273,21 @@ export function ListenerManagementSection({
         mutate={async () => {
           if (mutate) await mutate();
         }}
+        agentId={modalAgentId}
       />
 
       <section className={clsx("flex flex-col gap-4", className)}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-default-700">{title}</h2>
-          <Button color="primary" endContent={<PlusIcon />} onPress={onOpen}>
-            Add New
-          </Button>
+          {showCreationButton ? (
+            <Button
+              color="primary"
+              endContent={<PlusIcon />}
+              onPress={() => openCreationModal()}
+            >
+              {creationButtonLabel}
+            </Button>
+          ) : null}
         </div>
 
         <div className="rounded-large border border-default-200 bg-content1/60 p-4 shadow-sm backdrop-blur">
