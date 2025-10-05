@@ -300,6 +300,21 @@ export function ListenerCreationModal({
                       IPv4 disponíveis
                     </p>
                     <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectIp("0.0.0.0")}
+                          aria-pressed={listenerIp === "0.0.0.0"}
+                          className={clsx(
+                            "rounded-md border px-2 py-0.5 text-[11px] transition-colors focus:outline-none",
+                            listenerIp === "0.0.0.0"
+                              ? "border-primary-400 bg-primary-100 text-primary"
+                              : "border-default-200 bg-white text-default-600 hover:border-default-300 hover:bg-default-100",
+                          )}
+                        >
+                          Todas as interfaces
+                        </button>
+                      </div>
                       {agentInterfaces.length ? (
                         agentInterfaces.map((iface) => (
                           <div key={iface.key} className="flex flex-col gap-1">
