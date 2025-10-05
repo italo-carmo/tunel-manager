@@ -20,10 +20,6 @@
 
 ## Start
 
-```bash
-npm run dev
-```
-
 Habilite o arquivo ligolo-ng.yaml do Ligolo Proxy com esses dados:
 ```
 web:
@@ -52,6 +48,11 @@ web:
         ligolo: $argon2id$v=19$m=32768,t=3,p=4$H/V+uCAZhdP9srEdvWtk7w$0qo3fCMUVWLdRnupiYd+uYZRTmvSFqI19tDN+FI7Mzc
 
 ```
+
+```bash
+npm run dev
+```
+
 Ao entrar na interface web:
 ```
 API URL: http://127.0.0.1:8080
