@@ -104,6 +104,12 @@ function parseHostPort(addr?: string | null): { host: string | null; port: numbe
   const port = parts.length > 1 ? Number(parts[1]) : null;
   return { host, port: Number.isFinite(port) ? port : null };
 }
+
+function isAnyInterfaceHost(host?: string | null): boolean {
+  if (!host) return false;
+  const normalized = host.trim();
+  return normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]";
+}
 function uniqueIPv4s(addresses?: unknown): string[] {
   const out: string[] = [];
   asArray<string | number | null | undefined>(addresses).forEach((a) => {
@@ -349,7 +355,17 @@ export default function Topology() {
       const hasToProxy = listenerList.some((listener) => {
         const { host: src } = parseHostPort(listener?.ListenerAddr);
         const { host: dst } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
-        return src && ipToAgent.get(src) === agentId && dst && proxyIPs.has(dst);
+        if (!dst || !proxyIPs.has(dst)) return false;
+
+        if (src && ipToAgent.get(src) === agentId) return true;
+
+        const listenerAgentId =
+          listener?.AgentID != null ? String(listener.AgentID) : null;
+        if (listenerAgentId && listenerAgentId === agentId && isAnyInterfaceHost(src)) {
+          return true;
+        }
+
+        return false;
       });
 
       const targetArray = hasToProxy ? agentsWithProxy : regularAgents;
@@ -477,11 +493,24 @@ export default function Topology() {
     };
 
     const base: BaseConn[] = [];
-    const nodeIdForHost = (host: string | null) => {
-      if (!host) return null;
-      const agentId = ipToAgent.get(host);
-      if (agentId) return `agent-${agentId}`;
-      return `proxy-${host}`;
+    const resolveAgentNodeId = (agentKey?: string | null) => {
+      if (!agentKey) return null;
+      const key = String(agentKey);
+      return key ? `agent-${key}` : null;
+    };
+    const nodeIdForHost = (host: string | null, fallbackAgentKey?: string | null) => {
+      const normalizedHost = host?.trim() || null;
+      if (normalizedHost) {
+        const agentId = ipToAgent.get(normalizedHost);
+        if (agentId) return `agent-${agentId}`;
+        if (isAnyInterfaceHost(normalizedHost)) {
+          const fallback = resolveAgentNodeId(fallbackAgentKey);
+          if (fallback) return fallback;
+        }
+        return `proxy-${normalizedHost}`;
+      }
+
+      return resolveAgentNodeId(fallbackAgentKey);
     };
 
     listenerList.forEach((listener, index) => {
@@ -489,7 +518,10 @@ export default function Topology() {
       const dst = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
       const port = dst.port ?? src.port ?? null;
 
-      const srcId = nodeIdForHost(src.host ?? null);
+      const listenerAgentKey =
+        listener?.AgentID != null ? String(listener.AgentID) : null;
+
+      const srcId = nodeIdForHost(src.host ?? null, listenerAgentKey);
       const dstId = nodeIdForHost(dst.host ?? null);
       if (!srcId || !dstId) return;
 
