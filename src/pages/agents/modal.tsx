@@ -1,7 +1,6 @@
 import { useApi } from "@/hooks/useApi.ts";
-import { useCallback, useContext, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import ErrorContext from "@/contexts/Error.tsx";
-import { generateSlug } from "random-word-slugs";
 import {
   addToast,
   Button,
@@ -24,6 +23,7 @@ import { DicesIcon, NetworkIcon } from "lucide-react";
 import useAgents from "@/hooks/useAgents.ts";
 import { LigoloAgentList } from "@/types/agents.ts";
 import useInterfaces from "@/hooks/useInterfaces.ts";
+import { generateLigoloInterfaceName } from "@/lib/ligoloInterfaceNames.ts";
 
 interface InterfaceCreationProps {
   isOpen?: boolean;
@@ -46,10 +46,11 @@ export function AutorouteModal({
   const [selectedRoutes, setSelectedRoutes] = useState<string[]>([]);
   const [selectedTab, setSelectedTab] = useState<string | number>("");
   const { setError } = useContext(ErrorContext);
+  const wasOpenRef = useRef(false);
 
   const randInterfaceName = useCallback(
-    () => setInterfaceName(generateSlug(2).replace("-", "").substring(0, 15)),
-    [],
+    () => setInterfaceName(generateLigoloInterfaceName(interfaces)),
+    [interfaces],
   );
 
   const isLoopbackAddr = function (ip: string) {
@@ -69,24 +70,49 @@ export function AutorouteModal({
     if (selectedTab === "createInterface") {
       await post("api/v1/interfaces", {
         interface: interfaceName,
-      }).catch(setError);
+      });
     }
     await post("api/v1/routes", {
       interface: interfaceName,
       route: selectedRoutes,
-    }).catch(setError);
+    });
 
     if (mutate) await mutate();
-  }, [mutate, interfaceName, selectedRoutes]);
+  }, [interfaceName, mutate, post, selectedRoutes, selectedTab]);
 
-  const refreshOnOpen = useCallback(async () => {
-    setInterfaceName("");
+  const handleModalOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setInterfaceName(generateLigoloInterfaceName(interfaces));
+        setSelectedRoutes([]);
+        setSelectedTab("createInterface");
+        return;
+      }
 
-    if (onOpenChange) return onOpenChange();
-  }, [onOpenChange]);
+      setInterfaceName("");
+      setSelectedRoutes([]);
+      setSelectedTab("");
+      if (onOpenChange) onOpenChange();
+    },
+    [interfaces, onOpenChange],
+  );
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      setInterfaceName(generateLigoloInterfaceName(interfaces));
+      setSelectedRoutes([]);
+      setSelectedTab("createInterface");
+    }
+
+    wasOpenRef.current = Boolean(isOpen);
+  }, [interfaces, isOpen]);
 
   return (
-    <Modal isOpen={isOpen} placement="top-center" onOpenChange={refreshOnOpen}>
+    <Modal
+      isOpen={isOpen}
+      placement="top-center"
+      onOpenChange={handleModalOpenChange}
+    >
       <ModalContent>
         {(onClose) => (
           <>
@@ -139,7 +165,9 @@ export function AutorouteModal({
                           >
                             {interfaces
                               ? Object.keys(interfaces).map((ifName) => (
-                                  <SelectItem key={ifName}>{ifName}</SelectItem>
+                                  <SelectItem key={ifName} textValue={ifName}>
+                                    {ifName}
+                                  </SelectItem>
                                 ))
                               : null}
                           </Select>
@@ -185,15 +213,18 @@ export function AutorouteModal({
               <Button
                 color="warning"
                 onPress={async () => {
-                  await setupAutoroute().then(() => {
+                  try {
+                    await setupAutoroute();
                     addToast({
                       title: "Ligolo-ng",
                       description:
                         "Autoroute: interface and routes configured!",
                       color: "success",
                     });
-                  });
-                  onClose();
+                    onClose();
+                  } catch (error) {
+                    setError(error);
+                  }
                 }}
               >
                 Setup routes

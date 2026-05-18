@@ -1,4 +1,4 @@
-import { useCallback, useContext, useState } from "react";
+import { Fragment, useCallback, useContext, useState } from "react";
 import {
   Chip,
   Table,
@@ -25,7 +25,7 @@ export default function AgentPage() {
   const { setError } = useContext(ErrorContext);
 
   const { agents, loading, mutate: mutateAgent } = useAgents();
-  const { mutate: mutateInterface } = useInterfaces();
+  const { interfaces, mutate: mutateInterface } = useInterfaces();
   const {
     onOpen: onOpenInterfaceCreationModal,
     isOpen: isInterfaceCreationModalOpen,
@@ -120,6 +120,7 @@ export default function AgentPage() {
         mutate={mutateInterface}
         onOpenChange={onInterfaceCreated}
         isOpen={isInterfaceCreationModalOpen}
+        interfaces={interfaces ?? null}
       />
       <AutorouteModal
         mutate={mutateAgent}
@@ -144,7 +145,7 @@ export default function AgentPage() {
             <>
               {agents
                 ? Object.entries<LigoloAgent>(agents).map(([row, agent]) => (
-                    <>
+                    <Fragment key={row}>
                       <TableRow key={row} className="h-[60px] relative z-10">
                         <TableCell>{row}</TableCell>
                         <TableCell>
@@ -176,7 +177,7 @@ export default function AgentPage() {
                           <AgentActions row={row} agent={agent} />
                         </TableCell>
                       </TableRow>
-                      <TableRow className="z-0">
+                      <TableRow key={`${row}-interfaces`} className="z-0">
                         <TableCell className="p-0" colSpan={5}>
                           <AgentInterfaceList
                             open={row === `${agentExpand}`}
@@ -190,7 +191,7 @@ export default function AgentPage() {
                         <TableCell className="hidden">{null}</TableCell>
                         <TableCell className="hidden">{null}</TableCell>
                       </TableRow>
-                    </>
+                    </Fragment>
                   ))
                 : null}
             </>

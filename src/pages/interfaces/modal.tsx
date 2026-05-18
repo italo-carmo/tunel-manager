@@ -1,4 +1,4 @@
-import { useCallback, useContext, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   Button,
   Form,
@@ -10,11 +10,11 @@ import {
   ModalHeader,
 } from "@heroui/react";
 import { DicesIcon, EthernetPort, NetworkIcon } from "lucide-react";
-import { generateSlug } from "random-word-slugs";
 import { useApi } from "@/hooks/useApi.ts";
 import ErrorContext from "@/contexts/Error.tsx";
 import { interfaceRouteSchema, interfaceSchema } from "@/schemas/interfaces.ts";
 import type { LigoloInterfaces } from "@/types/interfaces.ts";
+import { generateLigoloInterfaceName } from "@/lib/ligoloInterfaceNames.ts";
 
 interface RouteCreationProps {
   isOpen?: boolean;
@@ -98,7 +98,7 @@ export function RouteCreationModal({
 
 interface InterfaceCreationProps {
   isOpen?: boolean;
-  onOpenChange?: (interfaceName: string) => void;
+  onOpenChange?: (interfaceName?: string) => void | Promise<void>;
   mutate?: () => Promise<unknown>;
   interfaces?: LigoloInterfaces | null;
 }
@@ -114,10 +114,12 @@ export function InterfaceCreationModal({
   const [interfaceName, setInterfaceName] = useState("");
   const { setError } = useContext(ErrorContext);
   const [formErrors, setFormErrors] = useState({});
+  const createdRef = useRef(false);
+  const wasOpenRef = useRef(false);
 
   const randInterfaceName = useCallback(
-    () => setInterfaceName(generateSlug(2).replace("-", "").substring(0, 15)),
-    [],
+    () => setInterfaceName(generateLigoloInterfaceName(interfaces)),
+    [interfaces],
   );
 
   const addInterface = useCallback(
@@ -129,23 +131,53 @@ export function InterfaceCreationModal({
       }
       setFormErrors({});
 
-      await post("api/v1/interfaces", { interface: interfaceName }).catch(
-        setError,
-      );
-      if (mutate) mutate();
+      try {
+        await post("api/v1/interfaces", { interface: interfaceName });
+      } catch (error) {
+        setError(error);
+        return;
+      }
+      if (mutate) await mutate();
+      createdRef.current = true;
+      if (onOpenChange) await onOpenChange(interfaceName);
       onClose();
     },
-    [mutate, interfaceName],
+    [mutate, interfaceName, onOpenChange, post, setError],
   );
 
-  const refreshOnOpen = useCallback(async () => {
-    setInterfaceName("");
+  const handleModalOpenChange = useCallback(
+    (open: boolean) => {
+      setFormErrors({});
 
-    if (onOpenChange) return onOpenChange(interfaceName);
-  }, [onOpenChange, interfaceName]);
+      if (open) {
+        createdRef.current = false;
+        setInterfaceName(generateLigoloInterfaceName(interfaces));
+        return;
+      }
+
+      setInterfaceName("");
+      if (!createdRef.current && onOpenChange) void onOpenChange();
+      createdRef.current = false;
+    },
+    [interfaces, onOpenChange],
+  );
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      createdRef.current = false;
+      setFormErrors({});
+      setInterfaceName(generateLigoloInterfaceName(interfaces));
+    }
+
+    wasOpenRef.current = Boolean(isOpen);
+  }, [interfaces, isOpen]);
 
   return (
-    <Modal isOpen={isOpen} placement="top-center" onOpenChange={refreshOnOpen}>
+    <Modal
+      isOpen={isOpen}
+      placement="top-center"
+      onOpenChange={handleModalOpenChange}
+    >
       <ModalContent>
         {(onClose) => (
           <>
@@ -194,7 +226,8 @@ export function InterfaceCreationModal({
                           </span>
                           {value?.Routes && value.Routes.length ? (
                             <span className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                              {value.Routes.length} rota{value.Routes.length > 1 ? "s" : ""}
+                              {value.Routes.length} rota
+                              {value.Routes.length > 1 ? "s" : ""}
                             </span>
                           ) : (
                             <span className="text-[11px] text-slate-400 dark:text-slate-500">

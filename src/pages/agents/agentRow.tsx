@@ -27,13 +27,24 @@ import {
   PowerOff,
 } from "lucide-react";
 import useInterfaces from "@/hooks/useInterfaces.ts";
-import { useContext } from "react";
+import { useContext, useMemo, type Key, type ReactNode } from "react";
 import { AgentTableContext } from "@/pages/agents/contexts/agentTableContext.ts";
+import { getAvailableTunnelInterfaceNames } from "@/lib/ligoloInterfaceNames.ts";
 
 interface IAgentActionsProps {
   agent: LigoloAgent;
   row: string;
 }
+
+type TunnelActionItem = {
+  key: string;
+  label: string;
+  description: string;
+  action: "new" | "existing";
+  iface?: string;
+  icon: ReactNode;
+  showDivider?: boolean;
+};
 
 export const AgentActions = ({ agent, row }: IAgentActionsProps) => {
   const { interfaces } = useInterfaces();
@@ -45,6 +56,44 @@ export const AgentActions = ({ agent, row }: IAgentActionsProps) => {
     toggleAgentExpand,
     agentExpand,
   } = useContext(AgentTableContext);
+  const tunnelItems = useMemo<TunnelActionItem[]>(() => {
+    const interfaceNames = getAvailableTunnelInterfaceNames(interfaces);
+
+    return [
+      {
+        key: "new-interface",
+        label: "Start with a new interface",
+        description: "Create a random interface then start the tunnel",
+        action: "new",
+        icon: (
+          <NetworkIcon className="text-xl text-default-500 pointer-events-none flex-shrink-0" />
+        ),
+        showDivider: interfaceNames.length > 0,
+      },
+      ...interfaceNames.map((ifName) => ({
+        key: `interface-${ifName}`,
+        label: `Bind to ${ifName}`,
+        description: "Use the following interface",
+        action: "existing" as const,
+        iface: ifName,
+        icon: (
+          <ChevronsLeftRightEllipsis className="text-xl text-default-500 pointer-events-none flex-shrink-0" />
+        ),
+      })),
+    ];
+  }, [interfaces]);
+
+  const handleTunnelAction = (key: Key) => {
+    const item = tunnelItems.find((option) => option.key === String(key));
+    if (!item) return;
+
+    if (item.action === "new") {
+      void onInterfaceModal(parseInt(row))();
+      return;
+    }
+
+    if (item.iface) void onTunnelStart(row, item.iface)();
+  };
 
   return (
     <div className="relative flex justify-between">
@@ -78,35 +127,22 @@ export const AgentActions = ({ agent, row }: IAgentActionsProps) => {
 
           {!agent.Running && (
             <>
-              <DropdownMenu aria-label="Static Actions">
-                <>
+              <DropdownMenu
+                aria-label="Static Actions"
+                items={tunnelItems}
+                onAction={handleTunnelAction}
+              >
+                {(item) => (
                   <DropdownItem
-                    key="new"
-                    startContent={
-                      <NetworkIcon className="text-xl text-default-500 pointer-events-none flex-shrink-0" />
-                    }
-                    showDivider={
-                      !!(interfaces && Object.keys(interfaces).length)
-                    }
-                    description="Create a random interface then start the tunnel"
-                    onPress={onInterfaceModal(parseInt(row))}
+                    key={item.key}
+                    textValue={item.label}
+                    startContent={item.icon}
+                    showDivider={item.showDivider}
+                    description={item.description}
                   >
-                    Start with a new interface
+                    {item.label}
                   </DropdownItem>
-                  {interfaces &&
-                    Object.keys(interfaces).map((ifName) => (
-                      <DropdownItem
-                        key={ifName}
-                        startContent={
-                          <ChevronsLeftRightEllipsis className="text-xl text-default-500 pointer-events-none flex-shrink-0" />
-                        }
-                        description="Use the following interface"
-                        onPress={onTunnelStart(row, ifName)}
-                      >
-                        Bind to {ifName}
-                      </DropdownItem>
-                    ))}
-                </>
+                )}
               </DropdownMenu>
             </>
           )}

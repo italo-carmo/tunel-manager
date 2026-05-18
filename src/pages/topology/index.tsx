@@ -24,9 +24,14 @@ import {
   Tooltip,
   useDisclosure,
 } from "@heroui/react";
-import { ChevronsLeftRightEllipsis, NetworkIcon, PlusIcon, Power, PowerOff } from "lucide-react";
-import cifrao from "../../../public/cifrao.png";
-import hash from "../../../public/hash.png";
+import {
+  ChevronsLeftRightEllipsis,
+  NetworkIcon,
+  PlusIcon,
+  Power,
+  PowerOff,
+  RotateCcw,
+} from "lucide-react";
 import { ListenerManagementSection } from "@/components/listeners/ListenerManagementSection.tsx";
 import useAgents from "@/hooks/useAgents.ts";
 import useInterfaces from "@/hooks/useInterfaces.ts";
@@ -39,6 +44,10 @@ import { InterfaceCreationModal } from "@/pages/interfaces/modal.tsx";
 import type { LigoloAgent } from "@/types/agents.ts";
 import type { LigoloInterfaces } from "@/types/interfaces.ts";
 import type { Listener } from "@/types/listeners.ts";
+import { getAvailableTunnelInterfaceNames } from "@/lib/ligoloInterfaceNames.ts";
+
+const cifrao = "/cifrao.png";
+const hash = "/hash.png";
 
 type Vec2 = { x: number; y: number };
 
@@ -79,7 +88,6 @@ type PortPin = {
 const DEFAULT_NODE_SIZE: NodeSize = { w: 220, h: 190 };
 const ROW_Y = 240;
 const COLUMN_GAP = DEFAULT_NODE_SIZE.h + 80;
-const COL_X = [160, 560, 960]; // Proxy | meio | direita
 const PIN_OFFSET = 15;
 const TUNNEL_COLOR_LIGHT = "rgba(100,116,139,0.85)"; // slate-500
 const TUNNEL_COLOR_DARK = "rgba(148,163,184,0.7)"; // slate-400
@@ -89,7 +97,10 @@ const TUNNEL_WIDTH = 8;
 // distância entre túneis paralelos do mesmo par
 const PARALLEL_GAP = 14;
 const PIN_STACK_GAP = 16;
-const POS_STORAGE_KEY = "topology-node-positions";
+const POS_STORAGE_KEY = "topology-node-positions-v2";
+const STAGE_WIDTH_FALLBACK = 1120;
+const STAGE_HEIGHT_FALLBACK = 1200;
+const NODE_GAP = 32;
 
 // helpers -----------------------------------------------------------------
 function asArray<T = unknown>(val: unknown): T[] {
@@ -97,7 +108,10 @@ function asArray<T = unknown>(val: unknown): T[] {
   if (val && typeof val === "object") return Object.values(val) as T[];
   return [];
 }
-function parseHostPort(addr?: string | null): { host: string | null; port: number | null } {
+function parseHostPort(addr?: string | null): {
+  host: string | null;
+  port: number | null;
+} {
   if (!addr) return { host: null, port: null };
   const parts = String(addr).trim().split(":");
   const host = parts[0] || null;
@@ -108,13 +122,28 @@ function parseHostPort(addr?: string | null): { host: string | null; port: numbe
 function isAnyInterfaceHost(host?: string | null): boolean {
   if (!host) return false;
   const normalized = host.trim();
-  return normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]";
+  return (
+    normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]"
+  );
 }
+
+function isLoopbackHost(host?: string | null): boolean {
+  if (!host) return false;
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  );
+}
+
 function uniqueIPv4s(addresses?: unknown): string[] {
   const out: string[] = [];
   asArray<string | number | null | undefined>(addresses).forEach((a) => {
     const ip = String(a ?? "").split("/")[0];
-    if (ip && ip.includes(".") && ip !== "127.0.0.1" && !out.includes(ip)) out.push(ip);
+    if (ip && ip.includes(".") && ip !== "127.0.0.1" && !out.includes(ip))
+      out.push(ip);
   });
   return out;
 }
@@ -123,6 +152,39 @@ function clamp(value: number, min: number, max: number) {
   if (Number.isNaN(value)) return min;
   if (min > max) return min;
   return Math.min(Math.max(value, min), max);
+}
+
+function getInitialStageWidth(): number {
+  if (typeof window === "undefined") return STAGE_WIDTH_FALLBACK;
+  return Math.max(window.innerWidth - 48, DEFAULT_NODE_SIZE.w * 3);
+}
+
+function getColumnX(stageWidth: number): [number, number, number] {
+  const sidePadding = DEFAULT_NODE_SIZE.w / 2 + 24;
+  const left = sidePadding;
+  const right = Math.max(left, stageWidth - sidePadding);
+  const minColumnGap = DEFAULT_NODE_SIZE.w + NODE_GAP;
+
+  if (right - left < minColumnGap * 2) {
+    return [left, right, right];
+  }
+
+  const middle = left + (right - left) / 2;
+
+  return [left, middle, right];
+}
+
+function nodesOverlap(
+  a: { center: Vec2; size: NodeSize },
+  b: { center: Vec2; size: NodeSize },
+): boolean {
+  const minDx = a.size.w / 2 + b.size.w / 2 + NODE_GAP;
+  const minDy = a.size.h / 2 + b.size.h / 2 + NODE_GAP;
+
+  return (
+    Math.abs(a.center.x - b.center.x) < minDx &&
+    Math.abs(a.center.y - b.center.y) < minDy
+  );
 }
 
 function normalizeVec(dx: number, dy: number): Vec2 {
@@ -149,24 +211,18 @@ function createPortPin(
   nodeId: string,
 ): PortPin {
   const rawDir = normalizeVec(target.x - origin.x, target.y - origin.y);
-  const hasDirection = Math.abs(rawDir.x) > 0.0001 || Math.abs(rawDir.y) > 0.0001;
+  const hasDirection =
+    Math.abs(rawDir.x) > 0.0001 || Math.abs(rawDir.y) > 0.0001;
   const dir = hasDirection ? rawDir : { x: 1, y: 0 };
   const pos = {
     x: origin.x + dir.x * PIN_OFFSET,
     y: origin.y + dir.y * PIN_OFFSET,
   };
-  const orientation = Math.abs(dir.x) >= Math.abs(dir.y) ? "horizontal" : "vertical";
+  const orientation =
+    Math.abs(dir.x) >= Math.abs(dir.y) ? "horizontal" : "vertical";
   const anchor =
-    orientation === "horizontal"
-      ? dir.x >= 0
-        ? "start"
-        : "end"
-      : "center";
-  const side:
-    | "top"
-    | "bottom"
-    | "left"
-    | "right" =
+    orientation === "horizontal" ? (dir.x >= 0 ? "start" : "end") : "center";
+  const side: "top" | "bottom" | "left" | "right" =
     orientation === "horizontal"
       ? dir.x >= 0
         ? "right"
@@ -175,20 +231,34 @@ function createPortPin(
         ? "bottom"
         : "top";
 
-  return { id, x: pos.x, y: pos.y, text, orientation, anchor, dir, nodeId, side };
+  return {
+    id,
+    x: pos.x,
+    y: pos.y,
+    text,
+    orientation,
+    anchor,
+    dir,
+    nodeId,
+    side,
+  };
 }
 
 function ipv4ToInt(ip: string): number | null {
   const octets = ip.split(".").map((part) => Number(part));
-  if (octets.length !== 4 || octets.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+  if (
+    octets.length !== 4 ||
+    octets.some((part) => Number.isNaN(part) || part < 0 || part > 255)
+  ) {
     return null;
   }
   return (
-    ((octets[0] << 24) >>> 0) +
-    ((octets[1] << 16) >>> 0) +
-    ((octets[2] << 8) >>> 0) +
-    (octets[3] >>> 0)
-  ) >>> 0;
+    (((octets[0] << 24) >>> 0) +
+      ((octets[1] << 16) >>> 0) +
+      ((octets[2] << 8) >>> 0) +
+      (octets[3] >>> 0)) >>>
+    0
+  );
 }
 
 function intToIPv4(value: number): string {
@@ -209,7 +279,7 @@ function toNetwork(address?: string | null): string | null {
   if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
   const ipValue = ipv4ToInt(ip.trim());
   if (ipValue === null) return null;
-  const mask = prefix === 0 ? 0 : ((0xffffffff << (32 - prefix)) >>> 0);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
   const networkValue = ipValue & mask;
   return `${intToIPv4(networkValue)}/${prefix}`;
 }
@@ -220,14 +290,17 @@ type AgentRouteOption = {
   address: string;
 };
 
-function buildAgentRouteOptions(agent?: LigoloAgent | null): AgentRouteOption[] {
+function buildAgentRouteOptions(
+  agent?: LigoloAgent | null,
+): AgentRouteOption[] {
   if (!agent) return [];
 
   const options: AgentRouteOption[] = [];
   const seen = new Set<string>();
 
   (agent.Network ?? []).forEach((network) => {
-    const ifaceName = network?.Name || `Interface ${network?.Index ?? ""}`.trim();
+    const ifaceName =
+      network?.Name || `Interface ${network?.Index ?? ""}`.trim();
     (network?.Addresses ?? []).forEach((addr) => {
       const networkAddr = toNetwork(addr);
       if (!networkAddr || seen.has(networkAddr)) return;
@@ -273,10 +346,12 @@ export default function Topology() {
     loading: listenersLoading,
     mutate: mutateListeners,
   } = useListeners();
-  const listenerModalOpenerRef = useRef<((agentId?: number) => void) | null>(null);
+  const listenerModalOpenerRef = useRef<((agentId?: number) => void) | null>(
+    null,
+  );
   const { interfaces, mutate: mutateInterfaces } = useInterfaces();
-  const interfaceNames = useMemo(
-    () => (interfaces ? Object.keys(interfaces) : []),
+  const tunnelInterfaceNames = useMemo(
+    () => getAvailableTunnelInterfaceNames(interfaces),
     [interfaces],
   );
   const { isDark } = useTheme();
@@ -294,10 +369,17 @@ export default function Topology() {
     onClose: onRouteModalClose,
   } = useDisclosure();
   const [routeAgentId, setRouteAgentId] = useState<string | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageWidth, setStageWidth] = useState(getInitialStageWidth);
   const [nodeSizes, setNodeSizes] = useState<Record<string, NodeSize>>({});
+  const nodeElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const nodeObserverRef = useRef<Map<string, ResizeObserver>>(new Map());
+  const nodeRefCallbacksRef = useRef<
+    Map<string, (node: HTMLDivElement | null) => void>
+  >(new Map());
   const tunnelColor = isDark ? TUNNEL_COLOR_DARK : TUNNEL_COLOR_LIGHT;
   const portFill = isDark ? PORT_FILL_DARK : PORT_FILL_LIGHT;
+  const columnX = useMemo(() => getColumnX(stageWidth), [stageWidth]);
   const listenerList = useMemo(
     () => asArray<Partial<Listener>>(listeners),
     [listeners],
@@ -323,14 +405,16 @@ export default function Topology() {
   const initialNodes = useMemo<Node[]>(() => {
     const proxyIPs = new Set<string>();
     listenerList.forEach((listener) => {
-      const { host: target } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
+      const { host: target } = parseHostPort(
+        listener?.RedirectAddr ?? listener?.RemoteAddr,
+      );
       if (target && !ipToAgent.has(target)) proxyIPs.add(target);
     });
 
     const layoutColumn = (items: Omit<Node, "center">[], colIndex: number) =>
       items.map((item, index) => ({
         ...item,
-        center: { x: COL_X[colIndex], y: ROW_Y + index * COLUMN_GAP },
+        center: { x: columnX[colIndex], y: ROW_Y + index * COLUMN_GAP },
       }));
 
     const proxyNodes = layoutColumn(
@@ -354,14 +438,20 @@ export default function Topology() {
       const ips = [...ipSet];
       const hasToProxy = listenerList.some((listener) => {
         const { host: src } = parseHostPort(listener?.ListenerAddr);
-        const { host: dst } = parseHostPort(listener?.RedirectAddr ?? listener?.RemoteAddr);
+        const { host: dst } = parseHostPort(
+          listener?.RedirectAddr ?? listener?.RemoteAddr,
+        );
         if (!dst || !proxyIPs.has(dst)) return false;
 
         if (src && ipToAgent.get(src) === agentId) return true;
 
         const listenerAgentId =
           listener?.AgentID != null ? String(listener.AgentID) : null;
-        if (listenerAgentId && listenerAgentId === agentId && isAnyInterfaceHost(src)) {
+        if (
+          listenerAgentId &&
+          listenerAgentId === agentId &&
+          isAnyInterfaceHost(src)
+        ) {
           return true;
         }
 
@@ -384,7 +474,7 @@ export default function Topology() {
       ...layoutColumn(agentsWithProxy, 1),
       ...layoutColumn(regularAgents, 2),
     ];
-  }, [agents, listenerList, ipToAgent]);
+  }, [agents, listenerList, ipToAgent, columnX]);
 
   const storedPositions = useMemo(loadStoredPositions, []);
 
@@ -397,12 +487,96 @@ export default function Topology() {
   useEffect(() => {
     setPos((prev) => {
       const next: Record<string, Vec2> = {};
-      initialNodes.forEach((n) => {
-        next[n.id] = prev[n.id] ?? storedPositions[n.id] ?? n.center;
+      const stageHeight =
+        stageRef.current?.clientHeight ?? STAGE_HEIGHT_FALLBACK;
+      const placed: { center: Vec2; size: NodeSize }[] = [];
+
+      const clampToStage = (center: Vec2, size: NodeSize): Vec2 => {
+        const minX = size.w / 2;
+        const maxX = Math.max(minX, stageWidth - size.w / 2);
+        const minY = size.h / 2;
+        const maxY = Math.max(minY, stageHeight - size.h / 2);
+
+        return {
+          x: clamp(center.x, minX, maxX),
+          y: clamp(center.y, minY, maxY),
+        };
+      };
+
+      const overlapsPlaced = (center: Vec2, size: NodeSize) =>
+        placed.some((item) => nodesOverlap({ center, size }, item));
+
+      const preferredCenters = initialNodes.map((n) => {
+        const size = nodeSizes[n.id] ?? DEFAULT_NODE_SIZE;
+        const current = prev[n.id] ?? storedPositions[n.id] ?? n.center;
+        return {
+          id: n.id,
+          center: clampToStage(current, size),
+          size,
+        };
+      });
+
+      const preferredPositionsOverlap = preferredCenters.some((candidate, i) =>
+        preferredCenters
+          .slice(i + 1)
+          .some((other) => nodesOverlap(candidate, other)),
+      );
+
+      initialNodes.forEach((n, index) => {
+        const size = nodeSizes[n.id] ?? DEFAULT_NODE_SIZE;
+        let center = preferredPositionsOverlap
+          ? clampToStage(n.center, size)
+          : preferredCenters[index].center;
+
+        if (overlapsPlaced(center, size)) {
+          center = clampToStage(n.center, size);
+        }
+
+        let attempts = 0;
+        while (
+          overlapsPlaced(center, size) &&
+          attempts <= initialNodes.length + 5
+        ) {
+          attempts += 1;
+          center = clampToStage(
+            {
+              x: n.center.x,
+              y: n.center.y + attempts * COLUMN_GAP,
+            },
+            size,
+          );
+        }
+
+        next[n.id] = center;
+        placed.push({ center, size });
       });
       return next;
     });
-  }, [initialNodes, storedPositions]);
+  }, [initialNodes, nodeSizes, stageWidth, storedPositions]);
+
+  useEffect(() => {
+    const updateStageWidth = () => {
+      const width = stageRef.current?.clientWidth ?? getInitialStageWidth();
+      setStageWidth((current) =>
+        Math.round(current) === Math.round(width) ? current : width,
+      );
+    };
+
+    updateStageWidth();
+    window.addEventListener("resize", updateStageWidth);
+
+    if (typeof ResizeObserver === "undefined" || !stageRef.current) {
+      return () => window.removeEventListener("resize", updateStageWidth);
+    }
+
+    const observer = new ResizeObserver(updateStageWidth);
+    observer.observe(stageRef.current);
+
+    return () => {
+      window.removeEventListener("resize", updateStageWidth);
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -427,22 +601,34 @@ export default function Topology() {
       })),
     [initialNodes, pos],
   );
-  const nodesById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes]);
+  const nodesById = useMemo(
+    () => Object.fromEntries(nodes.map((n) => [n.id, n])),
+    [nodes],
+  );
 
   const registerNode = useCallback(
     (id: string, node: HTMLDivElement | null) => {
+      const currentNode = nodeElementsRef.current.get(id) ?? null;
+      if (currentNode === node) return;
+
       const existing = nodeObserverRef.current.get(id);
       if (existing) {
         existing.disconnect();
         nodeObserverRef.current.delete(id);
       }
 
-      if (!node) return;
+      if (!node) {
+        nodeElementsRef.current.delete(id);
+        return;
+      }
+
+      nodeElementsRef.current.set(id, node);
 
       const updateSize = (width: number, height: number) => {
         const w = Math.round(width);
         const h = Math.round(height);
-        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0)
+          return;
         setNodeSizes((prev) => {
           const prevSize = prev[id];
           if (prevSize && prevSize.w === w && prevSize.h === h) return prev;
@@ -472,10 +658,37 @@ export default function Topology() {
     [],
   );
 
+  const getNodeRef = useCallback(
+    (id: string) => {
+      const existing = nodeRefCallbacksRef.current.get(id);
+      if (existing) return existing;
+
+      const callback = (node: HTMLDivElement | null) => registerNode(id, node);
+      nodeRefCallbacksRef.current.set(id, callback);
+      return callback;
+    },
+    [registerNode],
+  );
+
+  useEffect(() => {
+    const liveNodeIds = new Set(nodes.map((node) => node.id));
+
+    nodeElementsRef.current.forEach((_, id) => {
+      if (liveNodeIds.has(id)) return;
+
+      nodeObserverRef.current.get(id)?.disconnect();
+      nodeObserverRef.current.delete(id);
+      nodeElementsRef.current.delete(id);
+      nodeRefCallbacksRef.current.delete(id);
+    });
+  }, [nodes]);
+
   useEffect(() => {
     return () => {
       nodeObserverRef.current.forEach((observer) => observer.disconnect());
       nodeObserverRef.current.clear();
+      nodeElementsRef.current.clear();
+      nodeRefCallbacksRef.current.clear();
     };
   }, []);
 
@@ -498,15 +711,24 @@ export default function Topology() {
       const key = String(agentKey);
       return key ? `agent-${key}` : null;
     };
-    const nodeIdForHost = (host: string | null, fallbackAgentKey?: string | null) => {
+    const nodeIdForHost = (
+      host: string | null,
+      fallbackAgentKey?: string | null,
+      preferFallbackForLoopback = false,
+    ) => {
       const normalizedHost = host?.trim() || null;
       if (normalizedHost) {
+        const fallback = resolveAgentNodeId(fallbackAgentKey);
+        if (
+          fallback &&
+          (isAnyInterfaceHost(normalizedHost) ||
+            (preferFallbackForLoopback && isLoopbackHost(normalizedHost)))
+        ) {
+          return fallback;
+        }
+
         const agentId = ipToAgent.get(normalizedHost);
         if (agentId) return `agent-${agentId}`;
-        if (isAnyInterfaceHost(normalizedHost)) {
-          const fallback = resolveAgentNodeId(fallbackAgentKey);
-          if (fallback) return fallback;
-        }
         return `proxy-${normalizedHost}`;
       }
 
@@ -521,7 +743,7 @@ export default function Topology() {
       const listenerAgentKey =
         listener?.AgentID != null ? String(listener.AgentID) : null;
 
-      const srcId = nodeIdForHost(src.host ?? null, listenerAgentKey);
+      const srcId = nodeIdForHost(src.host ?? null, listenerAgentKey, true);
       const dstId = nodeIdForHost(dst.host ?? null);
       if (!srcId || !dstId) return;
 
@@ -603,10 +825,22 @@ export default function Topology() {
     connections.forEach((conn) => {
       if (!conn.port) return;
       pins.push(
-        createPortPin(`${conn.id}-from`, conn.from, conn.to, String(conn.port), conn.fromId),
+        createPortPin(
+          `${conn.id}-from`,
+          conn.from,
+          conn.to,
+          String(conn.port),
+          conn.fromId,
+        ),
       );
       pins.push(
-        createPortPin(`${conn.id}-to`, conn.to, conn.from, String(conn.port), conn.toId),
+        createPortPin(
+          `${conn.id}-to`,
+          conn.to,
+          conn.from,
+          String(conn.port),
+          conn.toId,
+        ),
       );
     });
 
@@ -669,9 +903,10 @@ export default function Topology() {
 
   const openListenerModalForAgent = useCallback((agentId?: string | null) => {
     const parsed = agentId != null ? Number(agentId) : undefined;
-    const numericAgentId = typeof parsed === "number" && Number.isFinite(parsed)
-      ? parsed
-      : undefined;
+    const numericAgentId =
+      typeof parsed === "number" && Number.isFinite(parsed)
+        ? parsed
+        : undefined;
     listenerModalOpenerRef.current?.(numericAgentId);
   }, []);
 
@@ -701,6 +936,10 @@ export default function Topology() {
       selectedAgent,
     ],
   );
+
+  const resetNodePositions = useCallback(() => {
+    setPos(Object.fromEntries(initialNodes.map((n) => [n.id, n.center])));
+  }, [initialNodes]);
 
   const openRouteModalForAgent = useCallback(
     (agentId: string) => {
@@ -733,7 +972,6 @@ export default function Topology() {
   );
 
   // drag-n-drop ------------------------------------------------------------
-  const stageRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: string; offset: Vec2 } | null>(null);
 
   function toLocalPoint(clientX: number, clientY: number) {
@@ -749,8 +987,16 @@ export default function Topology() {
       if (!local) return;
       const { rect } = local;
       const size = nodeSizes[drag.id] ?? DEFAULT_NODE_SIZE;
-      const nextX = clamp(local.x - drag.offset.x, size.w / 2, rect.width - size.w / 2);
-      const nextY = clamp(local.y - drag.offset.y, size.h / 2, rect.height - size.h / 2);
+      const nextX = clamp(
+        local.x - drag.offset.x,
+        size.w / 2,
+        rect.width - size.w / 2,
+      );
+      const nextY = clamp(
+        local.y - drag.offset.y,
+        size.h / 2,
+        rect.height - size.h / 2,
+      );
       setPos((p) => ({ ...p, [drag.id]: { x: nextX, y: nextY } }));
     }
     function onUp() {
@@ -767,7 +1013,10 @@ export default function Topology() {
   function beginDrag(e: React.MouseEvent, n: Node) {
     const local = toLocalPoint(e.clientX, e.clientY);
     if (!local) return;
-    setDrag({ id: n.id, offset: { x: local.x - n.center.x, y: local.y - n.center.y } });
+    setDrag({
+      id: n.id,
+      offset: { x: local.x - n.center.x, y: local.y - n.center.y },
+    });
   }
 
   // UI --------------------------------------------------------------------
@@ -793,7 +1042,8 @@ export default function Topology() {
             Topologia
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Gerencie listeners enquanto visualiza a topologia da rede em tempo real.
+            Gerencie listeners enquanto visualiza a topologia da rede em tempo
+            real.
           </p>
         </div>
       </div>
@@ -810,6 +1060,16 @@ export default function Topology() {
       />
 
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <Tooltip content="Restaurar a organização calculada da topologia">
+          <Button
+            color="default"
+            startContent={<RotateCcw size={16} />}
+            variant="flat"
+            onPress={resetNodePositions}
+          >
+            Resetar Layout
+          </Button>
+        </Tooltip>
         <Tooltip content="Criar uma nova interface Ligolo">
           <Button
             color="primary"
@@ -838,124 +1098,128 @@ export default function Topology() {
           className="relative w-full min-h-[460px] rounded-xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-900"
           style={{ minHeight: 1200, height: "clamp(420px, 65vh, 720px)" }}
         >
-        {/* conexões */}
-        <svg className="absolute inset-0 h-full w-full pointer-events-none">
-          {connections.map((conn) => (
-            <line
-              key={conn.id}
-              x1={conn.from.x}
-              y1={conn.from.y}
-              x2={conn.to.x}
-              y2={conn.to.y}
-              strokeWidth={TUNNEL_WIDTH}
-              stroke={tunnelColor}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          ))}
+          {/* conexões */}
+          <svg className="absolute inset-0 h-full w-full pointer-events-none">
+            {connections.map((conn) => (
+              <line
+                key={conn.id}
+                x1={conn.from.x}
+                y1={conn.from.y}
+                x2={conn.to.x}
+                y2={conn.to.y}
+                strokeWidth={TUNNEL_WIDTH}
+                stroke={tunnelColor}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))}
 
-          {portPins.map((p) => {
-            const W = 40;
-            const H = 12;
-            const R = 5;
-            const rectX =
-              p.orientation === "horizontal"
-                ? p.anchor === "end"
-                  ? p.x - W
-                  : p.x
-                : p.x - W / 2;
-            const rectY = p.y - H / 2;
-            const cx = rectX + W / 2;
-            const cy = rectY + H / 2;
+            {portPins.map((p) => {
+              const W = 40;
+              const H = 12;
+              const R = 5;
+              const rectX =
+                p.orientation === "horizontal"
+                  ? p.anchor === "end"
+                    ? p.x - W
+                    : p.x
+                  : p.x - W / 2;
+              const rectY = p.y - H / 2;
+              const cx = rectX + W / 2;
+              const cy = rectY + H / 2;
 
+              return (
+                <g key={p.id}>
+                  <rect
+                    x={rectX}
+                    y={rectY}
+                    width={W}
+                    height={H}
+                    rx={R}
+                    fill={portFill}
+                    opacity="0.85"
+                  />
+                  <text
+                    x={cx}
+                    y={cy}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    className="font-mono text-[11px] fill-slate-800 dark:fill-slate-900"
+                  >
+                    {p.text}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* nodes */}
+          {nodes.map((n) => {
+            const size = nodeSizes[n.id] ?? DEFAULT_NODE_SIZE;
             return (
-              <g key={p.id}>
-                <rect
-                  x={rectX}
-                  y={rectY}
-                  width={W}
-                  height={H}
-                  rx={R}
-                  fill={portFill}
-                  opacity="0.85"
-                />
-                <text
-                  x={cx}
-                  y={cy}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  className="font-mono text-[11px] fill-slate-800 dark:fill-slate-900"
-                >
-                  {p.text}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* nodes */}
-        {nodes.map((n) => {
-          const size = nodeSizes[n.id] ?? DEFAULT_NODE_SIZE;
-          return (
-            <div
-              key={n.id}
-              ref={(el) => registerNode(n.id, el)}
-              onMouseDown={(e) => beginDrag(e, n)}
-              className="absolute -translate-x-1/2 -translate-y-1/2 select-none cursor-grab active:cursor-grabbing"
-              style={{ left: n.center.x, top: n.center.y, width: size.w }}
-            >
-              <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
-                <div style={{ marginTop: 5, marginLeft: 5 }}>
-                  {n.label.includes("root") ? (
-                    <img src={hash} width={30} />
-                  ) : (
-                    <img width={30} src={cifrao} />
-                  )}
-                </div>
-
-                <div className="flex h-full flex-col gap-3 px-4 py-3">
-                  <div className="flex flex-1 flex-col items-center gap-2 text-center">
-                    <div
-                      style={{ fontSize: 12 }}
-                      className="text-base font-semibold text-slate-900 dark:text-slate-100"
-                    >
-                      {n.label}
-                    </div>
-                    {n.ips.length > 0 && (
-                      <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
-                        {n.ips.map((ip) => (
-                          <span
-                            key={ip}
-                            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
-                          >
-                            {ip}
-                          </span>
-                        ))}
-                      </div>
+              <div
+                key={n.id}
+                ref={getNodeRef(n.id)}
+                data-node-id={n.id}
+                data-node-kind={n.kind}
+                onMouseDown={(e) => beginDrag(e, n)}
+                className="absolute -translate-x-1/2 -translate-y-1/2 select-none cursor-grab active:cursor-grabbing"
+                style={{ left: n.center.x, top: n.center.y, width: size.w }}
+              >
+                <div className="h-full w-full rounded-2xl border border-slate-200 bg-white shadow-xl transition-colors dark:border-slate-700 dark:bg-slate-800">
+                  <div style={{ marginTop: 5, marginLeft: 5 }}>
+                    {n.label.includes("root") ? (
+                      <img src={hash} width={30} />
+                    ) : (
+                      <img width={30} src={cifrao} />
                     )}
                   </div>
-                  {n.kind === "agent" && n.agent && n.agentId && (
-                    <AgentTunnelPanel
-                      agent={n.agent}
-                      agentId={n.agentId}
-                      interfaceNames={interfaceNames}
-                      onStart={handleTunnelStart}
-                      onStop={handleTunnelStop}
-                      onCreateInterface={openInterfaceModalForAgent}
-                      onAddRoute={openRouteModalForAgent}
-                      onCreateListener={(agentId) => openListenerModalForAgent(agentId)}
-                    />
-                  )}
+
+                  <div className="flex h-full flex-col gap-3 px-4 py-3">
+                    <div className="flex flex-1 flex-col items-center gap-2 text-center">
+                      <div
+                        style={{ fontSize: 12 }}
+                        className="text-base font-semibold text-slate-900 dark:text-slate-100"
+                      >
+                        {n.label}
+                      </div>
+                      {n.ips.length > 0 && (
+                        <div className="flex max-h-24 w-full flex-wrap justify-center gap-1 overflow-y-auto">
+                          {n.ips.map((ip) => (
+                            <span
+                              key={ip}
+                              className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 transition-colors dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
+                            >
+                              {ip}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {n.kind === "agent" && n.agent && n.agentId && (
+                      <AgentTunnelPanel
+                        agent={n.agent}
+                        agentId={n.agentId}
+                        interfaceNames={tunnelInterfaceNames}
+                        onStart={handleTunnelStart}
+                        onStop={handleTunnelStop}
+                        onCreateInterface={openInterfaceModalForAgent}
+                        onAddRoute={openRouteModalForAgent}
+                        onCreateListener={(agentId) =>
+                          openListenerModalForAgent(agentId)
+                        }
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
         </div>
 
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Arraste as caixas livremente para reorganizar — os túneis paralelos se ajustam
-          automaticamente.
+          Arraste as caixas livremente para reorganizar — os túneis paralelos se
+          ajustam automaticamente.
         </p>
       </section>
     </div>
@@ -1102,6 +1366,7 @@ function AgentTunnelPanel({
                   {(item) => (
                     <DropdownItem
                       key={item.key}
+                      textValue={item.label}
                       startContent={item.icon}
                       description={item.description}
                       isDisabled={item.disabled}
@@ -1133,7 +1398,10 @@ function AgentTunnelPanel({
             + Listener
           </Button>
         </Tooltip>
-        <Tooltip content="Adicionar rotas com base nas redes do agente" color="primary">
+        <Tooltip
+          content="Adicionar rotas com base nas redes do agente"
+          color="primary"
+        >
           <Button
             size="sm"
             color="primary"
@@ -1165,7 +1433,9 @@ function AgentRouteModal({
   interfaces,
   onCreateRoute,
 }: AgentRouteModalProps) {
-  const [selectedInterface, setSelectedInterface] = useState<string | null>(null);
+  const [selectedInterface, setSelectedInterface] = useState<string | null>(
+    null,
+  );
   const [pendingRoute, setPendingRoute] = useState<string | null>(null);
 
   const agentRoutes = useMemo(() => buildAgentRouteOptions(agent), [agent]);
@@ -1174,7 +1444,10 @@ function AgentRouteModal({
     [interfaces],
   );
   const selectedInterfaceData = useMemo(
-    () => (selectedInterface && interfaces ? interfaces[selectedInterface] : undefined),
+    () =>
+      selectedInterface && interfaces
+        ? interfaces[selectedInterface]
+        : undefined,
     [interfaces, selectedInterface],
   );
   const existingRoutes = useMemo(() => {
@@ -1228,7 +1501,9 @@ function AgentRouteModal({
           <>
             <ModalHeader className="flex flex-col gap-1">
               <span className="text-base font-semibold">Rotas do agente</span>
-              <span className="text-sm text-slate-500 dark:text-slate-400">{agentLabel}</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                {agentLabel}
+              </span>
             </ModalHeader>
             <ModalBody className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
@@ -1284,7 +1559,8 @@ function AgentRouteModal({
                   </div>
                 ) : (
                   <span className="text-sm text-slate-500 dark:text-slate-400">
-                    Nenhuma interface Ligolo encontrada. Crie uma interface para adicionar rotas.
+                    Nenhuma interface Ligolo encontrada. Crie uma interface para
+                    adicionar rotas.
                   </span>
                 )}
               </div>
@@ -1298,7 +1574,10 @@ function AgentRouteModal({
                     <div className="flex flex-wrap gap-2">
                       {agentRoutes.map((route) => {
                         const alreadyAdded = existingRoutes.has(route.value);
-                        const disabled = alreadyAdded || (pendingRoute !== null && pendingRoute !== route.value);
+                        const disabled =
+                          alreadyAdded ||
+                          (pendingRoute !== null &&
+                            pendingRoute !== route.value);
                         return (
                           <Tooltip
                             key={route.value}
@@ -1332,7 +1611,8 @@ function AgentRouteModal({
                     </div>
                   ) : (
                     <span className="text-sm text-slate-500 dark:text-slate-400">
-                      Selecione uma interface Ligolo para habilitar as rotas sugeridas.
+                      Selecione uma interface Ligolo para habilitar as rotas
+                      sugeridas.
                     </span>
                   )
                 ) : (

@@ -17,7 +17,7 @@ export abstract class AppError extends Error {
       severity: "danger",
       color: "danger",
       title: `Error: ${this.name}`,
-      description: this.message
+      description: this.message,
     });
   }
 }
@@ -43,7 +43,7 @@ export abstract class HttpError extends AppError {
       severity: "danger",
       color: "danger",
       title: `(${this.statusCode}) Error: ${this.name}`,
-      description: this.message
+      description: this.message,
     });
   }
 }
@@ -61,7 +61,7 @@ export class UnknownHttpError extends HttpError {
     const apiError = new UnknownHttpError();
     apiError.statusCode = response.status ?? 500;
     apiError.name = response.error;
-    apiError.message = "";
+    apiError.message = response.message ?? response.error ?? "";
 
     return apiError;
   }
